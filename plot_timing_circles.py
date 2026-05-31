@@ -8,7 +8,7 @@ Edit the two lines at the top, then run:
 
 # ── configuration ────────────────────────────────────────────────────────────
 INJECTION_NUMBER = 96
-PLOT_FREQ = 56   # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
+PLOT_FREQ = 56  # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
 BASE_PATH = (
     "/Users/maxmelching/Documents/PhD/research/dsa-2000"
     "/early_warning_dsa/sky_localization/results"
@@ -43,13 +43,13 @@ from interferometer import interferometer
 
 
 # ── detector setup ────────────────────────────────────────────────────────────
-IFO_NAMES = ['H1', 'L1', 'V1']
+IFO_NAMES = ["H1", "L1", "V1"]
 detectors = {ifo: interferometer(ifo) for ifo in IFO_NAMES}
 
 _LAL_IFO = {
-    'H1': lal.LALDetectorIndexLHODIFF,
-    'L1': lal.LALDetectorIndexLLODIFF,
-    'V1': lal.LALDetectorIndexVIRGODIFF,
+    "H1": lal.LALDetectorIndexLHODIFF,
+    "L1": lal.LALDetectorIndexLLODIFF,
+    "V1": lal.LALDetectorIndexVIRGODIFF,
 }
 DETECTOR_POSITION = {}
 for _name in IFO_NAMES:
@@ -63,19 +63,23 @@ for _name in IFO_NAMES:
 # ── helper functions ──────────────────────────────────────────────────────────
 def get_ring_w_coloring(det1, det2, ra, dec, t_event):
     time_delay = detectors[det1].time_delay(
-        detectors[det2].vertex, ra=ra, dec=dec, t_event=t_event)
+        detectors[det2].vertex, ra=ra, dec=dec, t_event=t_event
+    )
     possible_ras, possible_decs = detectors[det1].sky_location(
-        detectors[det2].vertex, time_delay=time_delay, t_event=t_event)
+        detectors[det2].vertex, time_delay=time_delay, t_event=t_event
+    )
     possible_ras = possible_ras % (2 * np.pi)
 
     F1, F2 = [], []
     for r, d in zip(possible_ras, possible_decs):
+
         def _antenna(det, r=r, d=d):
-            ep = detectors[det].get_polarization_tensor(r, d, t_event, 0, 'plus')
-            ec = detectors[det].get_polarization_tensor(r, d, t_event, 0, 'cross')
-            Fp = np.einsum('ij,ij', detectors[det].detector_tensor, ep)
-            Fc = np.einsum('ij,ij', detectors[det].detector_tensor, ec)
-            return np.sqrt(Fp**2 + Fc**2)
+            ep = detectors[det].get_polarization_tensor(r, d, t_event, 0, "plus")
+            ec = detectors[det].get_polarization_tensor(r, d, t_event, 0, "cross")
+            Fp = np.einsum("ij,ij", detectors[det].detector_tensor, ep)
+            Fc = np.einsum("ij,ij", detectors[det].detector_tensor, ec)
+            return np.sqrt(Fp ** 2 + Fc ** 2)
+
         F1.append(_antenna(det1))
         F2.append(_antenna(det2))
     return possible_ras, possible_decs, np.array(F1), np.array(F2)
@@ -83,113 +87,135 @@ def get_ring_w_coloring(det1, det2, ra, dec, t_event):
 
 def _format_area(area):
     if area <= 100:
-        return np.format_float_positional(
-            area, precision=3, fractional=False, trim='-')
+        return np.format_float_positional(area, precision=3, fractional=False, trim="-")
     else:
-        return f'{np.round(area).astype(int):,d}'
+        return f"{np.round(area).astype(int):,d}"
 
 
 def plot_continents_icrs(ax, gmst):
     segs = coastlines()
     for lon_arr, lat_arr in zip(segs[::2], segs[1::2]):
-        ra  = np.rad2deg((np.deg2rad(np.array(lon_arr, float)) + gmst) % (2 * np.pi))
+        ra = np.rad2deg((np.deg2rad(np.array(lon_arr, float)) + gmst) % (2 * np.pi))
         dec = np.array(lat_arr, float)
         jumps = np.where(np.abs(np.diff(ra)) > 180)[0] + 1
-        ra  = np.insert(ra,  jumps, np.nan)
+        ra = np.insert(ra, jumps, np.nan)
         dec = np.insert(dec, jumps, np.nan)
-        ax.plot(ra, dec, color='0.5', linewidth=0.5,
-                transform=ax.get_transform('world'))
+        ax.plot(
+            ra, dec, color="0.5", linewidth=0.5, transform=ax.get_transform("world")
+        )
 
 
 def _rect(p0, p1, hw):
     p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
-    d = p1 - p0; d /= np.hypot(*d)
+    d = p1 - p0
+    d /= np.hypot(*d)
     n = np.array([-d[1], d[0]]) * hw
-    c = [p0+n, p1+n, p1-n, p0-n]
-    return Path(np.array(c + [c[0]]),
-                [Path.MOVETO, Path.LINETO, Path.LINETO, Path.LINETO, Path.CLOSEPOLY])
+    c = [p0 + n, p1 + n, p1 - n, p0 - n]
+    return Path(
+        np.array(c + [c[0]]),
+        [Path.MOVETO, Path.LINETO, Path.LINETO, Path.LINETO, Path.CLOSEPOLY],
+    )
+
 
 def _merge(paths):
-    return Path(np.vstack([p.vertices for p in paths]),
-                np.concatenate([p.codes for p in paths]))
+    return Path(
+        np.vstack([p.vertices for p in paths]), np.concatenate([p.codes for p in paths])
+    )
+
 
 def _pad(p, g):
-    return Path(np.vstack([p.vertices, [[g, g], [-g, -g]]]),
-                np.concatenate([p.codes, [Path.MOVETO, Path.MOVETO]]))
+    return Path(
+        np.vstack([p.vertices, [[g, g], [-g, -g]]]),
+        np.concatenate([p.codes, [Path.MOVETO, Path.MOVETO]]),
+    )
+
 
 _ARM, _IN, _OUT, _HW, _OW, _M, _R = 1.0, 0.60, 0.55, 0.045, 0.045, 0.24, 0.16
 _arc = Path.arc(180, 360)
-_pd  = Path(np.vstack([_arc.vertices * _R + [0.0, -_OUT], [0.0, -_OUT]]),
-            list(_arc.codes) + [Path.CLOSEPOLY])
-IFO_BEAMS   = _merge([_rect((-_IN, 0), (_ARM, 0), _HW),
-                      _rect((0, -_OUT), (0, _ARM), _HW)])
-IFO_OPTICS  = _merge([_rect((-0.20, -0.20), (0.20, 0.20), _OW),
-                      _rect((_ARM, -_M), (_ARM, _M), _OW),
-                      _rect((-_M, _ARM), (_M, _ARM), _OW), _pd])
+_pd = Path(
+    np.vstack([_arc.vertices * _R + [0.0, -_OUT], [0.0, -_OUT]]),
+    list(_arc.codes) + [Path.CLOSEPOLY],
+)
+IFO_BEAMS = _merge(
+    [_rect((-_IN, 0), (_ARM, 0), _HW), _rect((0, -_OUT), (0, _ARM), _HW)]
+)
+IFO_OPTICS = _merge(
+    [
+        _rect((-0.20, -0.20), (0.20, 0.20), _OW),
+        _rect((_ARM, -_M), (_ARM, _M), _OW),
+        _rect((-_M, _ARM), (_M, _ARM), _OW),
+        _pd,
+    ]
+)
 _G = max(np.max(np.abs(p.vertices)) for p in (IFO_BEAMS, IFO_OPTICS))
 IFO_BEAMS, IFO_OPTICS = _pad(IFO_BEAMS, _G), _pad(IFO_OPTICS, _G)
 
-def plot_ifo(ax, lon, lat, size=46, beam_color='red', optic_color='k', **kw):
-    common = dict(markersize=size, linestyle='none', markeredgewidth=0, **kw)
-    ax.plot(lon, lat, marker=IFO_BEAMS,  markerfacecolor=beam_color,  **common)
+
+def plot_ifo(ax, lon, lat, size=46, beam_color="red", optic_color="k", **kw):
+    common = dict(markersize=size, linestyle="none", markeredgewidth=0, **kw)
+    ax.plot(lon, lat, marker=IFO_BEAMS, markerfacecolor=beam_color, **common)
     ax.plot(lon, lat, marker=IFO_OPTICS, markerfacecolor=optic_color, **common)
 
 
 # ── load injection parameters ─────────────────────────────────────────────────
 stats = pd.read_csv(
-    os.path.join(BASE_PATH, 'stats', 'combined_stats.dat'),
-    sep='\t', index_col=0,
+    os.path.join(BASE_PATH, "stats", "combined_stats.dat"),
+    sep="\t",
+    index_col=0,
 )
-row = stats[stats['simulation_id'] == INJECTION_NUMBER].iloc[0]
-true_ra, true_dec = ast.literal_eval(row['ra_dec'])   # radians
-true_obstime      = float(row['time'])                 # GPS seconds
-true_gmst         = lal.GreenwichMeanSiderealTime(true_obstime) % (2 * np.pi)
+row = stats[stats["simulation_id"] == INJECTION_NUMBER].iloc[0]
+true_ra, true_dec = ast.literal_eval(row["ra_dec"])  # radians
+true_obstime = float(row["time"])  # GPS seconds
+true_gmst = lal.GreenwichMeanSiderealTime(true_obstime) % (2 * np.pi)
 
-print(f"Injection {INJECTION_NUMBER}: "
-      f"RA={np.rad2deg(true_ra):.2f}°  Dec={np.rad2deg(true_dec):.2f}°  "
-      f"GPS={true_obstime:.0f}")
+print(
+    f"Injection {INJECTION_NUMBER}: "
+    f"RA={np.rad2deg(true_ra):.2f}°  Dec={np.rad2deg(true_dec):.2f}°  "
+    f"GPS={true_obstime:.0f}"
+)
 
 
 # ── load available skymaps per frequency ──────────────────────────────────────
-freq_dirs = sorted(
-    [d for d in os.listdir(BASE_PATH) if d.isdigit()], key=int)
+freq_dirs = sorted([d for d in os.listdir(BASE_PATH) if d.isdigit()], key=int)
 skymaps = {}
 for freq_str in freq_dirs:
     fits_path = os.path.join(
-        BASE_PATH, freq_str, 'fits', f'sim_id_{INJECTION_NUMBER}.fits')
+        BASE_PATH, freq_str, "fits", f"sim_id_{INJECTION_NUMBER}.fits"
+    )
     if os.path.exists(fits_path):
         skymaps[int(freq_str)] = skymap_fits.read_sky_map(fits_path, moc=True)
 
 if not skymaps:
     raise FileNotFoundError(
-        f"No FITS files found for injection {INJECTION_NUMBER} in {BASE_PATH}")
+        f"No FITS files found for injection {INJECTION_NUMBER} in {BASE_PATH}"
+    )
 print(f"Skymaps found at frequencies (Hz): {sorted(skymaps)}")
 
 
 # ── precompute timing circles ─────────────────────────────────────────────────
-RING_PAIRS = [('H1', 'V1'), ('H1', 'L1'), ('L1', 'V1')]
+RING_PAIRS = [("H1", "V1"), ("H1", "L1"), ("L1", "V1")]
 rings = {
     (d1, d2): get_ring_w_coloring(d1, d2, true_ra, true_dec, true_obstime)
     for d1, d2 in RING_PAIRS
 }
 
 # ── plot ──────────────────────────────────────────────────────────────────────
-PROJECTION = 'astro degrees mollweide'
-TEXTSIZE   = 16
+PROJECTION = "astro degrees mollweide"
+TEXTSIZE = 16
 freq_colors = cm.plasma(np.linspace(0.1, 0.9, len(skymaps)))
 
 # plt.style.use('../../../plot_stylesheet.sty')
 
 
-with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth': 3}):
+with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth": 3}):
     fig = plt.figure(figsize=(14, 7))
-    ax  = fig.add_subplot(projection=PROJECTION)
+    ax = fig.add_subplot(projection=PROJECTION)
     ax.invert_xaxis()
 
-    PLT_ARGS = dict(transform=ax.get_transform('world'))
+    PLT_ARGS = dict(transform=ax.get_transform("world"))
 
-    ax.set_aspect('equal')
-    ax.set_facecolor(plt.get_cmap('cylon')(0.0))
+    ax.set_aspect("equal")
+    ax.set_facecolor(plt.get_cmap("cylon")(0.0))
     ax.grid()
 
     # continents
@@ -197,51 +223,59 @@ with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth'
 
     # skymap credible regions (50 % and 90 %) for PLOT_FREQ only
     skymap = skymaps[PLOT_FREQ]
-    dA = lsm_moc.uniq2pixarea(skymap['UNIQ'])
-    dP = skymap['PROBDENSITY'] * dA
-    cls = 100 * lsm_postprocess.find_greedy_credible_levels(
-        dP, skymap['PROBDENSITY'])
+    dA = lsm_moc.uniq2pixarea(skymap["UNIQ"])
+    dP = skymap["PROBDENSITY"] * dA
+    cls = 100 * lsm_postprocess.find_greedy_credible_levels(dP, skymap["PROBDENSITY"])
     CONTOUR_LEVELS = [50, 90]
     cs = ax.contour_hpx(
-        (Table({'UNIQ': skymap['UNIQ'], 'CLS': cls}), 'ICRS'),
-        colors='k',
+        (Table({"UNIQ": skymap["UNIQ"], "CLS": cls}), "ICRS"),
+        colors="k",
         linewidths=0.5,
         levels=CONTOUR_LEVELS,
-        order='nearest-neighbor',
+        order="nearest-neighbor",
     )
-    fmt = r'%g\%%'
+    fmt = r"%g\%%"
     plt.clabel(cs, fmt=fmt, fontsize=6, inline=True)
 
     # Annotate credible-region areas (mirrors ligo-skymap-plot --annotate).
-    sr_to_deg2 = u.sr.to(u.deg**2)
-    _sort_idx = np.flipud(np.argsort(skymap['PROBDENSITY']))
+    sr_to_deg2 = u.sr.to(u.deg ** 2)
+    _sort_idx = np.flipud(np.argsort(skymap["PROBDENSITY"]))
     _areas = lsm_postprocess.interp_greedy_credible_levels(
-        CONTOUR_LEVELS, cls[_sort_idx], np.cumsum(dA[_sort_idx]),
-        right=4 * np.pi)
+        CONTOUR_LEVELS, cls[_sort_idx], np.cumsum(dA[_sort_idx]), right=4 * np.pi
+    )
     _ann_lines = [
-        f'{int(np.round(p))}% area: {_format_area(a * sr_to_deg2)} deg²'
+        f"{int(np.round(p))}% area: {_format_area(a * sr_to_deg2)} deg²"
         for p, a in zip(CONTOUR_LEVELS, _areas)
     ]
-    ax.text(0.99, 0.99, '\n'.join(_ann_lines),
-            transform=ax.transAxes, ha='right', va='top',
-            fontsize=10, family='monospace',
-            bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.7))
+    ax.text(
+        0.99,
+        0.99,
+        "\n".join(_ann_lines),
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=10,
+        family="monospace",
+        bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.7),
+    )
 
     # Convert PROBDENSITY from per-sr to per-deg² so the dynamic range is
     # finite and imshow scales the colormap correctly (matches ligo_skymap_plot).
-    skymap['PROBDENSITY'] = skymap['PROBDENSITY'] / sr_to_deg2
+    skymap["PROBDENSITY"] = skymap["PROBDENSITY"] / sr_to_deg2
     img = ax.imshow_hpx(
-        (skymap, 'ICRS'), vmin=0, cmap='cylon', order='nearest-neighbor')
+        (skymap, "ICRS"), vmin=0, cmap="cylon", order="nearest-neighbor"
+    )
 
     # timing circles — one color per ring pair, inline label along the curve
     # _ring_colors = plt.get_cmap('tab10')(np.linspace(0, 0.3, len(RING_PAIRS)))
-    _ring_colors = plt.get_cmap('viridis')(np.linspace(0, 1, len(RING_PAIRS)))
-    _label_fracs = [0.85, 0.50, 0.75]   # fractional position along ring for each label
+    _ring_colors = plt.get_cmap("viridis")(np.linspace(0, 1, len(RING_PAIRS)))
+    _label_fracs = [0.85, 0.50, 0.75]  # fractional position along ring for each label
     for (d1, d2), color, frac in zip(RING_PAIRS, _ring_colors, _label_fracs):
         ras, decs, _, _ = rings[(d1, d2)]
-        label = f'{d1}-{d2}'
-        ax.scatter(np.rad2deg(ras), np.rad2deg(decs),
-                   s=1, color=color, zorder=10, **PLT_ARGS)
+        label = f"{d1}-{d2}"
+        ax.scatter(
+            np.rad2deg(ras), np.rad2deg(decs), s=1, color=color, zorder=10, **PLT_ARGS
+        )
         # Inline label: rotate text to match the local tangent direction
         idx = int(frac * len(ras)) % len(ras)
         step = max(3, len(ras) // 60)
@@ -256,28 +290,31 @@ with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth'
         ax.text(
             np.rad2deg(ras[idx]),
             np.rad2deg(decs[idx]),
-            f' {label} ',
-            transform=ax.get_transform('world'),
+            f" {label} ",
+            transform=ax.get_transform("world"),
             fontsize=9,
-            ha='center',
-            va='center',
+            ha="center",
+            va="center",
             rotation=angle,
-            rotation_mode='anchor',
+            rotation_mode="anchor",
             color=color,
-            fontweight='bold',
+            fontweight="bold",
             # bbox=dict(boxstyle='square,pad=0.1', fc='white', ec='none', alpha=0.85),
-            zorder=20
+            zorder=20,
         )
 
     # true source location
     ax.plot_coord(
         SkyCoord(np.rad2deg(true_ra), np.rad2deg(true_dec), unit=u.deg),
-        '*', markerfacecolor='white', markeredgecolor='black',
-        markersize=12, zorder=100,
+        "*",
+        markerfacecolor="white",
+        markeredgecolor="black",
+        markersize=12,
+        zorder=100,
     )
 
     # detector locations
-    LABEL_ARGS = dict(ha='right', va='bottom', fontsize=8, **PLT_ARGS)
+    LABEL_ARGS = dict(ha="right", va="bottom", fontsize=8, **PLT_ARGS)
     for name in IFO_NAMES:
         lon_deg, lat_deg = DETECTOR_POSITION[name]
         ra_det = np.rad2deg((np.deg2rad(lon_deg) + true_gmst) % (2 * np.pi))
@@ -297,7 +334,7 @@ with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth'
     plt.tight_layout()
     out_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        f'timing_circle_inj{INJECTION_NUMBER}.png',
+        f"timing_circle_inj{INJECTION_NUMBER}.png",
     )
     # plt.savefig(out_path, dpi=150, bbox_inches='tight')
     print(f"Saved → {out_path}")
