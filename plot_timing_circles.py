@@ -8,7 +8,7 @@ Edit the two lines at the top, then run:
 
 # ── configuration ────────────────────────────────────────────────────────────
 INJECTION_NUMBER = 111
-PLOT_FREQ        = 1024   # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
+PLOT_FREQ        = 56   # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
 BASE_PATH = (
     "/Users/maxmelching/Documents/PhD/research/dsa-2000"
     "/early_warning_dsa/sky_localization/results"
@@ -79,6 +79,14 @@ def get_ring_w_coloring(det1, det2, ra, dec, t_event):
         F1.append(_antenna(det1))
         F2.append(_antenna(det2))
     return possible_ras, possible_decs, np.array(F1), np.array(F2)
+
+
+def _format_area(area):
+    if area <= 100:
+        return np.format_float_positional(
+            area, precision=3, fractional=False, trim='-')
+    else:
+        return f'{np.round(area).astype(int):,d}'
 
 
 def plot_continents_icrs(ax, gmst):
@@ -190,32 +198,48 @@ with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth'
     dP  = skymap['PROBDENSITY'] * dA
     cls = 100 * lsm_postprocess.find_greedy_credible_levels(
         dP, skymap['PROBDENSITY'])
-    ax.contour_hpx(
+    CONTOUR_LEVELS = [50, 90]
+    cs = ax.contour_hpx(
         (Table({'UNIQ': skymap['UNIQ'], 'CLS': cls}), 'ICRS'),
         colors='k',
         linewidths=0.5,
-        levels=[50, 90],
+        levels=CONTOUR_LEVELS,
         order='nearest-neighbor',
     )
+    fmt = r'%g\%%'
+    plt.clabel(cs, fmt=fmt, fontsize=6, inline=True)
+
+    # Annotate credible-region areas (mirrors ligo-skymap-plot --annotate).
+    sr_to_deg2 = u.sr.to(u.deg**2)
+    _sort_idx = np.flipud(np.argsort(skymap['PROBDENSITY']))
+    _areas = lsm_postprocess.interp_greedy_credible_levels(
+        CONTOUR_LEVELS, cls[_sort_idx], np.cumsum(dA[_sort_idx]),
+        right=4 * np.pi)
+    _ann_lines = [
+        f'{int(np.round(p))}% area: {_format_area(a * sr_to_deg2)} deg²'
+        for p, a in zip(CONTOUR_LEVELS, _areas)
+    ]
+    ax.text(0.99, 0.99, '\n'.join(_ann_lines),
+            transform=ax.transAxes, ha='right', va='top',
+            fontsize=10, family='monospace',
+            bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.7))
+
     # Convert PROBDENSITY from per-sr to per-deg² so the dynamic range is
     # finite and imshow scales the colormap correctly (matches ligo_skymap_plot).
-    sr_to_deg2 = u.sr.to(u.deg**2)
     skymap['PROBDENSITY'] = skymap['PROBDENSITY'] / sr_to_deg2
     img = ax.imshow_hpx(
         (skymap, 'ICRS'), vmin=0, cmap='cylon', order='nearest-neighbor')
 
-    # timing circles
-    ring_color = plt.get_cmap('viridis')(0.0)
-    for (d1, d2), (ras, decs, _, _) in rings.items():
+    # timing circles — one color per ring pair sampled from a colormap
+    _ring_colors = plt.get_cmap('tab10')(np.linspace(0, 0.3, len(RING_PAIRS)))
+    ring_legend_handles = []
+    for (d1, d2), color in zip(RING_PAIRS, _ring_colors):
+        ras, decs, _, _ = rings[(d1, d2)]
         label = f'{d1}-{d2}'
         ax.scatter(np.rad2deg(ras), np.rad2deg(decs),
-                   s=1, color=ring_color, zorder=10, **PLT_ARGS)
-        idx  = 60  if label == 'L1-V1' else 420
-        ha   = 'right' if label == 'L1-V1' else 'left'
-        va   = 'top'   if label == 'L1-V1' else 'bottom'
-        ax.text(np.rad2deg(ras)[idx], np.rad2deg(decs)[idx], label,
-                transform=ax.get_transform('world'),
-                fontsize=TEXTSIZE, horizontalalignment=ha, verticalalignment=va)
+                   s=1, color=color, zorder=10, **PLT_ARGS)
+        ring_legend_handles.append(
+            Line2D([0], [0], color=color, lw=2, label=label))
 
     # true source location
     ax.plot_coord(
@@ -242,12 +266,9 @@ with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth'
         fontsize=12,
     )
 
-    legend_elements = [
-        Line2D([0], [0], color=color, lw=2, label=f'{freq} Hz')
-        for (freq, _), color in zip(sorted(skymaps.items()), freq_colors)
-    ]
-    ax.legend(handles=legend_elements, loc='lower right', fontsize=10,
-              framealpha=0.7)
+    ring_leg = ax.legend(handles=ring_legend_handles, loc='upper left', fontsize=10,
+                         title='Timing circles', framealpha=0.7)
+    ax.add_artist(ring_leg)
 
     plt.tight_layout()
     out_path = os.path.join(
