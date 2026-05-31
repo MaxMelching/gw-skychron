@@ -7,8 +7,8 @@ Edit the two lines at the top, then run:
 """
 
 # ── configuration ────────────────────────────────────────────────────────────
-INJECTION_NUMBER = 0
-PLOT_FREQ = 56  # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
+INJECTION_NUMBER = 7
+PLOT_FREQ = 1024  # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
 GEO = False  # True → 'geo globe' (geographic lon/lat); False → 'astro degrees mollweide' (RA/Dec)
 BASE_PATH = (
     "/Users/maxmelching/Documents/PhD/research/dsa-2000"
@@ -47,13 +47,15 @@ from interferometer import interferometer
 
 
 # ── detector setup ────────────────────────────────────────────────────────────
-IFO_NAMES = ["H1", "L1", "V1"]
+IFO_NAMES = ["H1", "L1", "V1", "K1", "I1"]
 detectors = {ifo: interferometer(ifo) for ifo in IFO_NAMES}
 
 _LAL_IFO = {
     "H1": lal.LALDetectorIndexLHODIFF,
     "L1": lal.LALDetectorIndexLLODIFF,
     "V1": lal.LALDetectorIndexVIRGODIFF,
+    "K1": lal.LALDetectorIndexKAGRADIFF,
+    "I1": lal.LALDetectorIndexLIODIFF,
 }
 DETECTOR_POSITION = {}
 for _name in IFO_NAMES:
@@ -197,7 +199,11 @@ print(f"Skymaps found at frequencies (Hz): {sorted(skymaps)}")
 
 
 # ── precompute timing circles ─────────────────────────────────────────────────
-RING_PAIRS = [("H1", "V1"), ("H1", "L1"), ("L1", "V1")]
+RING_PAIRS = [
+    ("L1", "H1"),  # LIGO only
+    ("L1", "V1"), ("H1", "V1"), # Add VIRGO
+    # ("L1", "K1"), ("H1", "K1"), ("V1", "K1"),  # Add KAGRA
+]
 rings = {
     (d1, d2): get_ring_w_coloring(d1, d2, true_ra, true_dec, true_obstime)
     for d1, d2 in RING_PAIRS
@@ -299,7 +305,7 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
     # timing circles — one color per ring pair, inline label along the curve
     # _ring_colors = plt.get_cmap('tab10')(np.linspace(0, 0.3, len(RING_PAIRS)))
     _ring_colors = plt.get_cmap("viridis")(np.linspace(0, 1, len(RING_PAIRS)))
-    _label_fracs = [0.85, 0.50, 0.75]  # fractional position along ring for each label
+    _label_fracs = 4 * [0.85, 0.50, 0.75]  # fractional position along ring for each label
     for (d1, d2), color, frac in zip(RING_PAIRS, _ring_colors, _label_fracs):
         ras, decs, _, _ = rings[(d1, d2)]
         label = f"{d1}-{d2}"
@@ -375,7 +381,7 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
     plt.tight_layout()
     out_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        f"timing_circle_inj{INJECTION_NUMBER}" + "_geo" if GEO else "" + ".png",
+        f"timing_circle_inj{INJECTION_NUMBER}" + ("_geo" if GEO else "") + ".png",
     )
     # plt.savefig(out_path, dpi=300, bbox_inches='tight')
     # print(f"Saved → {out_path}")
