@@ -10,6 +10,8 @@ Edit the two lines at the top, then run:
 INJECTION_NUMBER = 4
 PLOT_FREQ = 56  # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
 GEO = False  # True → 'geo globe' (geographic lon/lat); False → 'astro degrees mollweide' (RA/Dec)
+TIMING_SIGMA_MS = 0.42  # timing uncertainty [ms]; None → single rings, float → annulus
+N_ANNULUS = 50  # number of sampled rings per pair when TIMING_SIGMA_MS is set
 BASE_PATH = "../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many"
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -197,7 +199,8 @@ print(f"Skymaps found at frequencies (Hz): {sorted(skymaps)}")
 # ── precompute timing circles ─────────────────────────────────────────────────
 RING_PAIRS = [
     ("L1", "H1"),  # LIGO only
-    ("L1", "V1"), ("H1", "V1"), # Add VIRGO
+    ("L1", "V1"),
+    ("H1", "V1"),  # Add VIRGO
     # ("L1", "K1"), ("H1", "K1"), ("V1", "K1"),  # Add KAGRA
 ]
 rings = {
@@ -307,10 +310,49 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
     # timing circles — one color per ring pair, inline label along the curve
     # _ring_colors = plt.get_cmap('tab10')(np.linspace(0, 0.3, len(RING_PAIRS)))
     _ring_colors = plt.get_cmap("viridis")(np.linspace(0, 1, len(RING_PAIRS)))
-    _label_fracs = 4 * [0.85, 0.50, 0.75]  # fractional position along ring for each label
+    _label_fracs = 4 * [
+        0.85,
+        0.50,
+        0.75,
+    ]  # fractional position along ring for each label
     for (d1, d2), color, frac in zip(RING_PAIRS, _ring_colors, _label_fracs):
         ras, decs, _, _ = rings[(d1, d2)]
         label = f"{d1}-{d2}"
+
+        if TIMING_SIGMA_MS is not None:
+            # Draw annulus: sample time delays from N(τ_true, σ²) and overlay rings
+            sigma_tau = TIMING_SIGMA_MS * 1e-3
+            true_tau = detectors[d1].time_delay(
+                detectors[d2].vertex, ra=true_ra, dec=true_dec, t_event=true_obstime
+            )
+            # clip to the physical range [-D/c, D/c] so arcsin is always valid
+            D = np.linalg.norm(detectors[d2].vertex - detectors[d1].vertex)
+            max_tau = D / 3e8
+            np.random.seed(42)
+            tau_samples = np.clip(
+                np.random.normal(true_tau, sigma_tau, N_ANNULUS),
+                -max_tau + 1e-9,
+                max_tau - 1e-9,
+            )
+            for tau in tau_samples:
+                s_ras, s_decs = detectors[d1].sky_location(
+                    detectors[d2].vertex, time_delay=tau, t_event=true_obstime
+                )
+                s_ras = s_ras % (2 * np.pi)
+                if GEO:
+                    s_lons = np.rad2deg((s_ras - true_gmst) % (2 * np.pi))
+                else:
+                    s_lons = np.rad2deg(s_ras)
+                ax.scatter(
+                    s_lons,
+                    np.rad2deg(s_decs),
+                    color=color,
+                    s=1.5,
+                    alpha=0.1,
+                    zorder=9,
+                    **PLT_ARGS,
+                )
+
         # Convert ICRS (RA/Dec radians) → native projection coordinates (degrees)
         if GEO:
             lons = np.rad2deg((ras - true_gmst) % (2 * np.pi))
@@ -388,7 +430,10 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
     det_label = "".join([n[0] for n in sorted(ACTIVATED_IFOS)]).lower()
     out_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        f"timing_circle_inj{INJECTION_NUMBER}_f{PLOT_FREQ}_{det_label}" + ("_geo" if GEO else "") + ".png",
+        f"timing_circle_inj{INJECTION_NUMBER}_f{PLOT_FREQ}_{det_label}"
+        + ("_w_unc" if TIMING_SIGMA_MS is not None else "")
+        + ("_geo" if GEO else "")
+        + ".png",
     )
     plt.savefig(out_path, dpi=300, bbox_inches='tight')
     print(f"Saved → {out_path}")
