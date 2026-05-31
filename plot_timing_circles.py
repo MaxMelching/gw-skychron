@@ -7,8 +7,8 @@ Edit the two lines at the top, then run:
 """
 
 # ── configuration ────────────────────────────────────────────────────────────
-INJECTION_NUMBER = 7
-PLOT_FREQ = 1024  # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
+INJECTION_NUMBER = 4
+PLOT_FREQ = 56  # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
 GEO = False  # True → 'geo globe' (geographic lon/lat); False → 'astro degrees mollweide' (RA/Dec)
 BASE_PATH = (
     "/Users/maxmelching/Documents/PhD/research/dsa-2000"
@@ -202,7 +202,7 @@ print(f"Skymaps found at frequencies (Hz): {sorted(skymaps)}")
 RING_PAIRS = [
     ("L1", "H1"),  # LIGO only
     ("L1", "V1"), ("H1", "V1"), # Add VIRGO
-    # ("L1", "K1"), ("H1", "K1"), ("V1", "K1"),  # Add KAGRA
+    ("L1", "K1"), ("H1", "K1"), ("V1", "K1"),  # Add KAGRA
 ]
 rings = {
     (d1, d2): get_ring_w_coloring(d1, d2, true_ra, true_dec, true_obstime)
@@ -326,6 +326,10 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
         dlon = (dlon + 180) % 360 - 180
         # both projections invert the x-axis, so the angle formula is the same
         angle = np.rad2deg(np.arctan2(dlat, dlon))
+        # Both projections invert the x-axis, so increasing lon moves LEFT on screen.
+        # Negate dlon so the angle is in screen space: arctan2(screen_dy, screen_dx).
+        # angle = np.rad2deg(np.arctan2(dlat, -dlon))
+        # angle = np.rad2deg(np.arctan2(dlat, dlon+90))
         ax.text(
             lons[idx],
             lats[idx],
@@ -334,7 +338,7 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
             fontsize=9,
             ha="center",
             va="center",
-            rotation=angle,
+            rotation=angle,  # TODO: decide whether to comment or not -> leave, is fine for most cases
             rotation_mode="anchor",
             color=color,
             fontweight="bold",
