@@ -7,7 +7,8 @@ Edit the two lines at the top, then run:
 """
 
 # ── configuration ────────────────────────────────────────────────────────────
-INJECTION_NUMBER = 102
+INJECTION_NUMBER = 111
+PLOT_FREQ        = 1024   # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
 BASE_PATH = (
     "/Users/maxmelching/Documents/PhD/research/dsa-2000"
     "/early_warning_dsa/sky_localization/results"
@@ -24,17 +25,18 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-import healpy as hp
 from matplotlib import rc_context
 from matplotlib.lines import Line2D
 from matplotlib.path import Path
 from astropy.coordinates import SkyCoord
+from astropy.table import Table
 import astropy.units as u
 import ligo.skymap.plot
-from ligo.skymap.io import read_sky_map
+from ligo.skymap.io import fits as skymap_fits
+from ligo.skymap import moc as lsm_moc
+from ligo.skymap import postprocess as lsm_postprocess
 from ligo.skymap.plot import outline_text
 from ligo.skymap.plot.backdrop import coastlines
-from ligo.skymap.postprocess import find_greedy_credible_levels
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from interferometer import interferometer
@@ -148,8 +150,7 @@ for freq_str in freq_dirs:
     fits_path = os.path.join(
         BASE_PATH, freq_str, 'fits', f'sim_id_{INJECTION_NUMBER}.fits')
     if os.path.exists(fits_path):
-        skymap, _ = read_sky_map(fits_path, nest=False)
-        skymaps[int(freq_str)] = skymap
+        skymaps[int(freq_str)] = skymap_fits.read_sky_map(fits_path, moc=True)
 
 if not skymaps:
     raise FileNotFoundError(
@@ -163,13 +164,6 @@ rings = {
     (d1, d2): get_ring_w_coloring(d1, d2, true_ra, true_dec, true_obstime)
     for d1, d2 in RING_PAIRS
 }
-
-# ── RA/Dec grid for reprojecting HEALPix skymaps ─────────────────────────────
-_ra_g  = np.linspace(0, 360, 720)
-_dec_g = np.linspace(-90, 90, 360)
-_RA, _DEC = np.meshgrid(_ra_g, _dec_g)
-_theta_g, _phi_g = np.deg2rad(90 - _DEC), np.deg2rad(_RA)
-
 
 # ── plot ──────────────────────────────────────────────────────────────────────
 PROJECTION = 'astro degrees mollweide'
@@ -190,19 +184,25 @@ with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth'
     # continents
     plot_continents_icrs(ax, true_gmst)
 
-    # skymap credible regions (50 % and 90 %)
-    for (freq, skymap), color in zip(sorted(skymaps.items()), freq_colors):
-        nside   = hp.npix2nside(len(skymap))
-        pix     = hp.ang2pix(nside, _theta_g, _phi_g, nest=False)
-        cls     = find_greedy_credible_levels(skymap)
-        cls_grid = cls[pix]
-        ax.contour(
-            _RA, _DEC, cls_grid,
-            levels=[0.5, 0.9],
-            colors=[color],
-            linewidths=1.5,
-            **PLT_ARGS,
-        )
+    # skymap credible regions (50 % and 90 %) for PLOT_FREQ only
+    skymap = skymaps[PLOT_FREQ]
+    dA  = lsm_moc.uniq2pixarea(skymap['UNIQ'])
+    dP  = skymap['PROBDENSITY'] * dA
+    cls = 100 * lsm_postprocess.find_greedy_credible_levels(
+        dP, skymap['PROBDENSITY'])
+    ax.contour_hpx(
+        (Table({'UNIQ': skymap['UNIQ'], 'CLS': cls}), 'ICRS'),
+        colors='k',
+        linewidths=0.5,
+        levels=[50, 90],
+        order='nearest-neighbor',
+    )
+    # Convert PROBDENSITY from per-sr to per-deg² so the dynamic range is
+    # finite and imshow scales the colormap correctly (matches ligo_skymap_plot).
+    sr_to_deg2 = u.sr.to(u.deg**2)
+    skymap['PROBDENSITY'] = skymap['PROBDENSITY'] / sr_to_deg2
+    img = ax.imshow_hpx(
+        (skymap, 'ICRS'), vmin=0, cmap='cylon', order='nearest-neighbor')
 
     # timing circles
     ring_color = plt.get_cmap('viridis')(0.0)
@@ -254,6 +254,6 @@ with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth'
         os.path.dirname(os.path.abspath(__file__)),
         f'timing_circle_inj{INJECTION_NUMBER}.png',
     )
-    plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    # plt.savefig(out_path, dpi=150, bbox_inches='tight')
     print(f"Saved → {out_path}")
     plt.show()
