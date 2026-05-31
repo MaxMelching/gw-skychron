@@ -7,8 +7,8 @@ Edit the two lines at the top, then run:
 """
 
 # ── configuration ────────────────────────────────────────────────────────────
-INJECTION_NUMBER = 111
-PLOT_FREQ        = 56   # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
+INJECTION_NUMBER = 96
+PLOT_FREQ = 56   # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
 BASE_PATH = (
     "/Users/maxmelching/Documents/PhD/research/dsa-2000"
     "/early_warning_dsa/sky_localization/results"
@@ -178,6 +178,9 @@ PROJECTION = 'astro degrees mollweide'
 TEXTSIZE   = 16
 freq_colors = cm.plasma(np.linspace(0.1, 0.9, len(skymaps)))
 
+# plt.style.use('../../../plot_stylesheet.sty')
+
+
 with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth': 3}):
     fig = plt.figure(figsize=(14, 7))
     ax  = fig.add_subplot(projection=PROJECTION)
@@ -194,8 +197,8 @@ with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth'
 
     # skymap credible regions (50 % and 90 %) for PLOT_FREQ only
     skymap = skymaps[PLOT_FREQ]
-    dA  = lsm_moc.uniq2pixarea(skymap['UNIQ'])
-    dP  = skymap['PROBDENSITY'] * dA
+    dA = lsm_moc.uniq2pixarea(skymap['UNIQ'])
+    dP = skymap['PROBDENSITY'] * dA
     cls = 100 * lsm_postprocess.find_greedy_credible_levels(
         dP, skymap['PROBDENSITY'])
     CONTOUR_LEVELS = [50, 90]
@@ -230,16 +233,41 @@ with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth'
     img = ax.imshow_hpx(
         (skymap, 'ICRS'), vmin=0, cmap='cylon', order='nearest-neighbor')
 
-    # timing circles — one color per ring pair sampled from a colormap
-    _ring_colors = plt.get_cmap('tab10')(np.linspace(0, 0.3, len(RING_PAIRS)))
-    ring_legend_handles = []
-    for (d1, d2), color in zip(RING_PAIRS, _ring_colors):
+    # timing circles — one color per ring pair, inline label along the curve
+    # _ring_colors = plt.get_cmap('tab10')(np.linspace(0, 0.3, len(RING_PAIRS)))
+    _ring_colors = plt.get_cmap('viridis')(np.linspace(0, 1, len(RING_PAIRS)))
+    _label_fracs = [0.85, 0.50, 0.75]   # fractional position along ring for each label
+    for (d1, d2), color, frac in zip(RING_PAIRS, _ring_colors, _label_fracs):
         ras, decs, _, _ = rings[(d1, d2)]
         label = f'{d1}-{d2}'
         ax.scatter(np.rad2deg(ras), np.rad2deg(decs),
                    s=1, color=color, zorder=10, **PLT_ARGS)
-        ring_legend_handles.append(
-            Line2D([0], [0], color=color, lw=2, label=label))
+        # Inline label: rotate text to match the local tangent direction
+        idx = int(frac * len(ras)) % len(ras)
+        step = max(3, len(ras) // 60)
+        i0, i1 = (idx - step) % len(ras), (idx + step) % len(ras)
+        dra = np.rad2deg(ras[i1]) - np.rad2deg(ras[i0])
+        ddec = np.rad2deg(decs[i1]) - np.rad2deg(decs[i0])
+        # wrap dRA to (-180, 180] to handle 0/360 boundary
+        dra = (dra + 180) % 360 - 180
+        # RA increases to the left on the projection, so negate dRA for screen angle
+        # angle = np.rad2deg(np.arctan2(ddec, -dra))
+        angle = np.rad2deg(np.arctan2(ddec, dra))  # -> but we invert axis
+        ax.text(
+            np.rad2deg(ras[idx]),
+            np.rad2deg(decs[idx]),
+            f' {label} ',
+            transform=ax.get_transform('world'),
+            fontsize=9,
+            ha='center',
+            va='center',
+            rotation=angle,
+            rotation_mode='anchor',
+            color=color,
+            fontweight='bold',
+            # bbox=dict(boxstyle='square,pad=0.1', fc='white', ec='none', alpha=0.85),
+            zorder=20
+        )
 
     # true source location
     ax.plot_coord(
@@ -252,7 +280,7 @@ with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth'
     LABEL_ARGS = dict(ha='right', va='bottom', fontsize=8, **PLT_ARGS)
     for name in IFO_NAMES:
         lon_deg, lat_deg = DETECTOR_POSITION[name]
-        ra_det  = np.rad2deg((np.deg2rad(lon_deg) + true_gmst) % (2 * np.pi))
+        ra_det = np.rad2deg((np.deg2rad(lon_deg) + true_gmst) % (2 * np.pi))
         dec_det = lat_deg
         plot_ifo(ax, ra_det, dec_det, size=24, **PLT_ARGS)
         ax.text(ra_det, dec_det, name, **LABEL_ARGS)
@@ -265,10 +293,6 @@ with rc_context({'xtick.labelsize': 14, 'ytick.labelsize': 14, 'lines.linewidth'
         f"GPS = {true_obstime:.0f}",
         fontsize=12,
     )
-
-    ring_leg = ax.legend(handles=ring_legend_handles, loc='upper left', fontsize=10,
-                         title='Timing circles', framealpha=0.7)
-    ax.add_artist(ring_leg)
 
     plt.tight_layout()
     out_path = os.path.join(
