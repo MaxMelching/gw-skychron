@@ -10,11 +10,7 @@ Edit the two lines at the top, then run:
 INJECTION_NUMBER = 4
 PLOT_FREQ = 56  # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
 GEO = False  # True → 'geo globe' (geographic lon/lat); False → 'astro degrees mollweide' (RA/Dec)
-BASE_PATH = (
-    "/Users/maxmelching/Documents/PhD/research/dsa-2000"
-    "/early_warning_dsa/sky_localization/results"
-    "/H1_O5_L1_O5_V1_O5_many"
-)
+BASE_PATH = "../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many"
 # ─────────────────────────────────────────────────────────────────────────────
 
 import ast
@@ -208,6 +204,7 @@ rings = {
     (d1, d2): get_ring_w_coloring(d1, d2, true_ra, true_dec, true_obstime)
     for d1, d2 in RING_PAIRS
 }
+ACTIVATED_IFOS = set(np.array(RING_PAIRS).flatten())
 
 # ── plot ──────────────────────────────────────────────────────────────────────
 PROJECTION = "geo globe" if GEO else "astro degrees mollweide"
@@ -368,7 +365,7 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
 
     # detector locations
     LABEL_ARGS = dict(ha="right", va="bottom", fontsize=8, **PLT_ARGS)
-    for name in IFO_NAMES:
+    for name in ACTIVATED_IFOS:
         geo_lon, geo_lat = DETECTOR_POSITION[name]  # always geographic
         if GEO:
             plot_lon, plot_lat = geo_lon, geo_lat
@@ -388,7 +385,7 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
     )
 
     plt.tight_layout()
-    det_label = "".join([n[0] for n in sorted(set(np.array(RING_PAIRS).flatten()))]).lower()
+    det_label = "".join([n[0] for n in sorted(ACTIVATED_IFOS)]).lower()
     out_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         f"timing_circle_inj{INJECTION_NUMBER}_f{PLOT_FREQ}_{det_label}" + ("_geo" if GEO else "") + ".png",
