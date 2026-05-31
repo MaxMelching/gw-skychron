@@ -202,7 +202,7 @@ print(f"Skymaps found at frequencies (Hz): {sorted(skymaps)}")
 RING_PAIRS = [
     ("L1", "H1"),  # LIGO only
     ("L1", "V1"), ("H1", "V1"), # Add VIRGO
-    ("L1", "K1"), ("H1", "K1"), ("V1", "K1"),  # Add KAGRA
+    # ("L1", "K1"), ("H1", "K1"), ("V1", "K1"),  # Add KAGRA
 ]
 rings = {
     (d1, d2): get_ring_w_coloring(d1, d2, true_ra, true_dec, true_obstime)
@@ -222,7 +222,12 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
     if GEO:
         # geo globe needs obstime so its WCS can convert ICRS ↔ ITRS
         ax = fig.add_subplot(
-            projection=PROJECTION, obstime=Time(true_obstime, format="gps")
+            projection=PROJECTION,
+            obstime=Time(true_obstime, format="gps"),
+            # center takes lon, lat in degrees
+            # center="-90d +23d",
+            center=f"{np.rad2deg((true_ra - true_gmst) % (2 * np.pi))}d +23d",
+            # Not replacing 23 degrees because I kinda like view on Northern hemisphere
         )
         # Geo.__init__ already calls invert_xaxis(); calling it again would un-flip
     else:
@@ -383,10 +388,11 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
     )
 
     plt.tight_layout()
+    det_label = "".join([n[0] for n in sorted(set(np.array(RING_PAIRS).flatten()))]).lower()
     out_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        f"timing_circle_inj{INJECTION_NUMBER}" + ("_geo" if GEO else "") + ".png",
+        f"timing_circle_inj{INJECTION_NUMBER}_f{PLOT_FREQ}_{det_label}" + ("_geo" if GEO else "") + ".png",
     )
-    # plt.savefig(out_path, dpi=300, bbox_inches='tight')
-    # print(f"Saved → {out_path}")
+    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+    print(f"Saved → {out_path}")
     plt.show()
