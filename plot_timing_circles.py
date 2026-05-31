@@ -7,8 +7,9 @@ Edit the two lines at the top, then run:
 """
 
 # ── configuration ────────────────────────────────────────────────────────────
-INJECTION_NUMBER = 96
+INJECTION_NUMBER = 0
 PLOT_FREQ = 56  # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
+GEO = False  # True → 'geo globe' (geographic lon/lat); False → 'astro degrees mollweide' (RA/Dec)
 BASE_PATH = (
     "/Users/maxmelching/Documents/PhD/research/dsa-2000"
     "/early_warning_dsa/sky_localization/results"
@@ -26,10 +27,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib import rc_context
-from matplotlib.lines import Line2D
+
+# from matplotlib.colors import LinearSegmentedColormap
+# from matplotlib.lines import Line2D
 from matplotlib.path import Path
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
+from astropy.time import Time
 import astropy.units as u
 import ligo.skymap.plot
 from ligo.skymap.io import fits as skymap_fits
@@ -200,7 +204,7 @@ rings = {
 }
 
 # ── plot ──────────────────────────────────────────────────────────────────────
-PROJECTION = "astro degrees mollweide"
+PROJECTION = "geo globe" if GEO else "astro degrees mollweide"
 TEXTSIZE = 16
 freq_colors = cm.plasma(np.linspace(0.1, 0.9, len(skymaps)))
 
@@ -208,18 +212,31 @@ freq_colors = cm.plasma(np.linspace(0.1, 0.9, len(skymaps)))
 
 
 with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth": 3}):
-    fig = plt.figure(figsize=(14, 7))
-    ax = fig.add_subplot(projection=PROJECTION)
-    ax.invert_xaxis()
+    fig = plt.figure(figsize=(9, 9) if GEO else (14, 7))
+    if GEO:
+        # geo globe needs obstime so its WCS can convert ICRS ↔ ITRS
+        ax = fig.add_subplot(
+            projection=PROJECTION, obstime=Time(true_obstime, format="gps")
+        )
+        # Geo.__init__ already calls invert_xaxis(); calling it again would un-flip
+    else:
+        ax = fig.add_subplot(projection=PROJECTION)
+        ax.invert_xaxis()
 
     PLT_ARGS = dict(transform=ax.get_transform("world"))
+    # For astro: 'world' == ICRS (RA, Dec).  For geo: 'world' == ITRS (lon, lat).
 
-    ax.set_aspect("equal")
+    if not GEO:
+        ax.set_aspect("equal")
     ax.set_facecolor(plt.get_cmap("cylon")(0.0))
     ax.grid()
 
     # continents
-    plot_continents_icrs(ax, true_gmst)
+    if GEO:
+        # coastlines() returns raw geographic (lon, lat) — pass directly to 'world' (ITRS)
+        ax.plot(*coastlines(), color="0.5", linewidth=0.5, **PLT_ARGS)
+    else:
+        plot_continents_icrs(ax, true_gmst)
 
     # skymap credible regions (50 % and 90 %) for PLOT_FREQ only
     skymap = skymaps[PLOT_FREQ]
@@ -262,9 +279,22 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
     # Convert PROBDENSITY from per-sr to per-deg² so the dynamic range is
     # finite and imshow scales the colormap correctly (matches ligo_skymap_plot).
     skymap["PROBDENSITY"] = skymap["PROBDENSITY"] / sr_to_deg2
+
     img = ax.imshow_hpx(
         (skymap, "ICRS"), vmin=0, cmap="cylon", order="nearest-neighbor"
     )
+
+    # Build a cylon variant whose alpha ramps from 0 (transparent at vmin) to
+    # 1 (opaque at vmax), so zero-probability pixels are invisible and the
+    # timing rings remain visible beneath the map at any zorder.
+    # _rgba = plt.get_cmap("cylon")(np.linspace(0, 1, 256))
+    # _rgba[:, 3] = np.linspace(0, 1, 256)
+    # _cylon_alpha = LinearSegmentedColormap.from_list("cylon_alpha", _rgba)
+
+    # img = ax.imshow_hpx(
+    #     (skymap, "ICRS"), vmin=0, cmap=_cylon_alpha,
+    #     order="nearest-neighbor", zorder=200
+    # )
 
     # timing circles — one color per ring pair, inline label along the curve
     # _ring_colors = plt.get_cmap('tab10')(np.linspace(0, 0.3, len(RING_PAIRS)))
@@ -273,23 +303,26 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
     for (d1, d2), color, frac in zip(RING_PAIRS, _ring_colors, _label_fracs):
         ras, decs, _, _ = rings[(d1, d2)]
         label = f"{d1}-{d2}"
-        ax.scatter(
-            np.rad2deg(ras), np.rad2deg(decs), s=1, color=color, zorder=10, **PLT_ARGS
-        )
+        # Convert ICRS (RA/Dec radians) → native projection coordinates (degrees)
+        if GEO:
+            lons = np.rad2deg((ras - true_gmst) % (2 * np.pi))
+        else:
+            lons = np.rad2deg(ras)
+        lats = np.rad2deg(decs)
+        ax.scatter(lons, lats, s=1, color=color, zorder=10, **PLT_ARGS)
         # Inline label: rotate text to match the local tangent direction
         idx = int(frac * len(ras)) % len(ras)
         step = max(3, len(ras) // 60)
         i0, i1 = (idx - step) % len(ras), (idx + step) % len(ras)
-        dra = np.rad2deg(ras[i1]) - np.rad2deg(ras[i0])
-        ddec = np.rad2deg(decs[i1]) - np.rad2deg(decs[i0])
-        # wrap dRA to (-180, 180] to handle 0/360 boundary
-        dra = (dra + 180) % 360 - 180
-        # RA increases to the left on the projection, so negate dRA for screen angle
-        # angle = np.rad2deg(np.arctan2(ddec, -dra))
-        angle = np.rad2deg(np.arctan2(ddec, dra))  # -> but we invert axis
+        dlon = lons[i1] - lons[i0]
+        dlat = lats[i1] - lats[i0]
+        # wrap to (-180, 180] to handle 0/360 boundary
+        dlon = (dlon + 180) % 360 - 180
+        # both projections invert the x-axis, so the angle formula is the same
+        angle = np.rad2deg(np.arctan2(dlat, dlon))
         ax.text(
-            np.rad2deg(ras[idx]),
-            np.rad2deg(decs[idx]),
+            lons[idx],
+            lats[idx],
             f" {label} ",
             transform=ax.get_transform("world"),
             fontsize=9,
@@ -304,23 +337,31 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
         )
 
     # true source location
-    ax.plot_coord(
-        SkyCoord(np.rad2deg(true_ra), np.rad2deg(true_dec), unit=u.deg),
+    _src_lon = (
+        np.rad2deg((true_ra - true_gmst) % (2 * np.pi)) if GEO else np.rad2deg(true_ra)
+    )
+    ax.plot(
+        _src_lon,
+        np.rad2deg(true_dec),
         "*",
         markerfacecolor="white",
         markeredgecolor="black",
         markersize=12,
         zorder=100,
+        **PLT_ARGS,
     )
 
     # detector locations
     LABEL_ARGS = dict(ha="right", va="bottom", fontsize=8, **PLT_ARGS)
     for name in IFO_NAMES:
-        lon_deg, lat_deg = DETECTOR_POSITION[name]
-        ra_det = np.rad2deg((np.deg2rad(lon_deg) + true_gmst) % (2 * np.pi))
-        dec_det = lat_deg
-        plot_ifo(ax, ra_det, dec_det, size=24, **PLT_ARGS)
-        ax.text(ra_det, dec_det, name, **LABEL_ARGS)
+        geo_lon, geo_lat = DETECTOR_POSITION[name]  # always geographic
+        if GEO:
+            plot_lon, plot_lat = geo_lon, geo_lat
+        else:
+            plot_lon = np.rad2deg((np.deg2rad(geo_lon) + true_gmst) % (2 * np.pi))
+            plot_lat = geo_lat
+        plot_ifo(ax, plot_lon, plot_lat, size=24, **PLT_ARGS)
+        ax.text(plot_lon, plot_lat, name, **LABEL_ARGS)
 
     outline_text(ax)
 
@@ -334,8 +375,8 @@ with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth"
     plt.tight_layout()
     out_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        f"timing_circle_inj{INJECTION_NUMBER}.png",
+        f"timing_circle_inj{INJECTION_NUMBER}" + "_geo" if GEO else "" + ".png",
     )
-    # plt.savefig(out_path, dpi=150, bbox_inches='tight')
-    print(f"Saved → {out_path}")
+    # plt.savefig(out_path, dpi=300, bbox_inches='tight')
+    # print(f"Saved → {out_path}")
     plt.show()
