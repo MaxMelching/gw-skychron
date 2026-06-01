@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Max Melching
 """
 Plot timing circles and sky-localization credible regions for one injection.
 
-Edit the two lines at the top, then run:
-    python plot_timing_circles.py
+Basic usage:
+    python plot_timing_circles.py 4 --base-path ../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many
+
+Full example:
+    python plot_timing_circles.py 4 \\
+        --base-path ../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many \\
+        --plot-freq 56 \\
+        --ring-pairs L1-H1 L1-V1 H1-V1 \\
+        --timing-sigma-ms 0.42 \\
+        --n-annulus 50 \\
+        --contour-levels 50 90 \\
+        --geo \\
+        --output my_plot.png
 """
 
-# ── configuration ────────────────────────────────────────────────────────────
-INJECTION_NUMBER = 4
-PLOT_FREQ = 56  # Hz — must exist in BASE_PATH/{PLOT_FREQ}/fits/
-GEO = False  # True → 'geo globe' (geographic lon/lat); False → 'astro degrees mollweide' (RA/Dec)
-TIMING_SIGMA_MS = 0.42  # timing uncertainty [ms]; None → single rings, float → annulus
-N_ANNULUS = 50  # number of sampled rings per pair when TIMING_SIGMA_MS is set
-BASE_PATH = "../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many"
-# ─────────────────────────────────────────────────────────────────────────────
-
+import argparse
 import ast
 import os
 import sys
@@ -25,15 +29,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib import rc_context
-
-# from matplotlib.colors import LinearSegmentedColormap
-# from matplotlib.lines import Line2D
 from matplotlib.path import Path
-from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time
 import astropy.units as u
-import ligo.skymap.plot
+import ligo.skymap.plot  # Needed to register projections etc
 from ligo.skymap.io import fits as skymap_fits
 from ligo.skymap import moc as lsm_moc
 from ligo.skymap import postprocess as lsm_postprocess
@@ -44,7 +44,108 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from interferometer import interferometer
 
 
-# ── detector setup ────────────────────────────────────────────────────────────
+# ── argument parsing ──────────────────────────────────────────────────────────
+def build_parser():
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument(
+        "injection_number",
+        type=int,
+        help="Simulation ID to plot",
+    )
+    p.add_argument(
+        "--base-path",
+        default="../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many",
+        help="Path to the results directory containing stats/ and freq/fits/ subdirs",
+    )
+    p.add_argument(
+        "--plot-freq",
+        type=int,
+        default=56,
+        metavar="HZ",
+        help="Frequency [Hz] of the skymap to display (must exist in BASE_PATH/HZ/fits/)",
+    )
+    p.add_argument(
+        "--ring-pairs",
+        nargs="+",
+        default=["L1-H1", "L1-V1", "H1-V1"],
+        metavar="D1-D2",
+        help="Detector pairs for timing circles, e.g. L1-H1 L1-V1 H1-V1 H1-K1",
+    )
+    p.add_argument(
+        "--geo",
+        action="store_true",
+        help="Use 'geo globe' projection instead of 'astro degrees mollweide'",
+    )
+    p.add_argument(
+        "--geo-center",
+        default="auto",
+        metavar="'LONd LATd'",
+        help="Center for geo globe: 'auto' centres on the source longitude; "
+        "or pass any string accepted by SkyCoord, e.g. '-90d +23d'",
+    )
+    p.add_argument(
+        "--timing-sigma-ms",
+        type=float,
+        default=None,
+        metavar="MS",
+        help="Draw annuli by sampling time delays from N(τ_true, σ²) with this σ [ms]. "
+        "Omit for single rings.",
+    )
+    p.add_argument(
+        "--n-annulus",
+        type=int,
+        default=50,
+        metavar="N",
+        help="Number of sampled rings per pair when --timing-sigma-ms is set",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for annulus sampling (ensures reproducible figures)",
+    )
+    p.add_argument(
+        "--contour-levels",
+        nargs="+",
+        type=float,
+        default=[50, 90],
+        metavar="PCT",
+        help="Credible-region contour levels in percent",
+    )
+    p.add_argument(
+        "--no-skymap",
+        action="store_true",
+        help="Skip loading and plotting the HEALPix skymap entirely",
+    )
+    p.add_argument(
+        "--output",
+        "-o",
+        default=None,
+        help="Path for the saved PNG (default: auto-named in the script directory)",
+    )
+    p.add_argument(
+        "--dpi",
+        type=int,
+        default=300,
+        help="DPI for the saved figure",
+    )
+    p.add_argument(
+        "--no-save",
+        action="store_true",
+        help="Do not save the figure to disk",
+    )
+    p.add_argument(
+        "--no-show",
+        action="store_true",
+        help="Do not open an interactive window (useful for batch runs)",
+    )
+    return p
+
+
+# ── detector setup (module-level constants) ───────────────────────────────────
 IFO_NAMES = ["H1", "L1", "V1", "K1", "I1"]
 detectors = {ifo: interferometer(ifo) for ifo in IFO_NAMES}
 
@@ -123,7 +224,8 @@ def _rect(p0, p1, hw):
 
 def _merge(paths):
     return Path(
-        np.vstack([p.vertices for p in paths]), np.concatenate([p.codes for p in paths])
+        np.vstack([p.vertices for p in paths]),
+        np.concatenate([p.codes for p in paths]),
     )
 
 
@@ -161,280 +263,288 @@ def plot_ifo(ax, lon, lat, size=46, beam_color="red", optic_color="k", **kw):
     ax.plot(lon, lat, marker=IFO_OPTICS, markerfacecolor=optic_color, **common)
 
 
-# ── load injection parameters ─────────────────────────────────────────────────
-stats = pd.read_csv(
-    os.path.join(BASE_PATH, "stats", "combined_stats.dat"),
-    sep="\t",
-    index_col=0,
-)
-row = stats[stats["simulation_id"] == INJECTION_NUMBER].iloc[0]
-true_ra, true_dec = ast.literal_eval(row["ra_dec"])  # radians
-true_obstime = float(row["time"])  # GPS seconds
-true_gmst = lal.GreenwichMeanSiderealTime(true_obstime) % (2 * np.pi)
+# ── main ──────────────────────────────────────────────────────────────────────
+def main(argv=None):
+    args = build_parser().parse_args(argv)
 
-print(
-    f"Injection {INJECTION_NUMBER}: "
-    f"RA={np.rad2deg(true_ra):.2f}°  Dec={np.rad2deg(true_dec):.2f}°  "
-    f"GPS={true_obstime:.0f}"
-)
+    # ── parse ring pairs ──────────────────────────────────────────────────────
+    ring_pairs = []
+    for token in args.ring_pairs:
+        parts = token.split("-")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid ring pair '{token}'; expected format 'D1-D2'")
+        d1, d2 = parts
+        if d1 not in IFO_NAMES or d2 not in IFO_NAMES:
+            raise ValueError(f"Unknown detector in pair '{token}'. Known: {IFO_NAMES}")
+        ring_pairs.append((d1, d2))
 
-
-# ── load available skymaps per frequency ──────────────────────────────────────
-freq_dirs = sorted([d for d in os.listdir(BASE_PATH) if d.isdigit()], key=int)
-skymaps = {}
-for freq_str in freq_dirs:
-    fits_path = os.path.join(
-        BASE_PATH, freq_str, "fits", f"sim_id_{INJECTION_NUMBER}.fits"
+    # ── load injection parameters ─────────────────────────────────────────────
+    stats = pd.read_csv(
+        os.path.join(args.base_path, "stats", "combined_stats.dat"),
+        sep="\t",
+        index_col=0,
     )
-    if os.path.exists(fits_path):
-        skymaps[int(freq_str)] = skymap_fits.read_sky_map(fits_path, moc=True)
+    row = stats[stats["simulation_id"] == args.injection_number].iloc[0]
+    true_ra, true_dec = ast.literal_eval(row["ra_dec"])  # radians
+    true_obstime = float(row["time"])  # GPS seconds
+    true_gmst = lal.GreenwichMeanSiderealTime(true_obstime) % (2 * np.pi)
 
-if not skymaps:
-    raise FileNotFoundError(
-        f"No FITS files found for injection {INJECTION_NUMBER} in {BASE_PATH}"
+    print(
+        f"Injection {args.injection_number}: "
+        f"RA={np.rad2deg(true_ra):.2f}°  Dec={np.rad2deg(true_dec):.2f}°  "
+        f"GPS={true_obstime:.0f}"
     )
-print(f"Skymaps found at frequencies (Hz): {sorted(skymaps)}")
 
-
-# ── precompute timing circles ─────────────────────────────────────────────────
-RING_PAIRS = [
-    ("L1", "H1"),  # LIGO only
-    ("L1", "V1"),
-    ("H1", "V1"),  # Add VIRGO
-    # ("L1", "K1"), ("H1", "K1"), ("V1", "K1"),  # Add KAGRA
-]
-rings = {
-    (d1, d2): get_ring_w_coloring(d1, d2, true_ra, true_dec, true_obstime)
-    for d1, d2 in RING_PAIRS
-}
-ACTIVATED_IFOS = set(np.array(RING_PAIRS).flatten())
-
-# ── plot ──────────────────────────────────────────────────────────────────────
-PROJECTION = "geo globe" if GEO else "astro degrees mollweide"
-TEXTSIZE = 16
-freq_colors = cm.plasma(np.linspace(0.1, 0.9, len(skymaps)))
-
-# plt.style.use('../../../plot_stylesheet.sty')
-
-
-with rc_context({"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth": 3}):
-    fig = plt.figure(figsize=(9, 9) if GEO else (14, 7))
-    if GEO:
-        # geo globe needs obstime so its WCS can convert ICRS ↔ ITRS
-        ax = fig.add_subplot(
-            projection=PROJECTION,
-            obstime=Time(true_obstime, format="gps"),
-            # center takes lon, lat in degrees
-            # center="-90d +23d",
-            center=f"{np.rad2deg((true_ra - true_gmst) % (2 * np.pi))}d +23d",
-            # Not replacing 23 degrees because I kinda like view on Northern hemisphere
+    # ── load skymaps ──────────────────────────────────────────────────────────
+    skymaps = {}
+    if not args.no_skymap:
+        freq_dirs = sorted(
+            [d for d in os.listdir(args.base_path) if d.isdigit()], key=int
         )
-        # Geo.__init__ already calls invert_xaxis(); calling it again would un-flip
-    else:
-        ax = fig.add_subplot(projection=PROJECTION)
-        ax.invert_xaxis()
-
-    PLT_ARGS = dict(transform=ax.get_transform("world"))
-    # For astro: 'world' == ICRS (RA, Dec).  For geo: 'world' == ITRS (lon, lat).
-
-    if not GEO:
-        ax.set_aspect("equal")
-    ax.set_facecolor(plt.get_cmap("cylon")(0.0))
-    ax.grid()
-
-    # continents
-    if GEO:
-        # coastlines() returns raw geographic (lon, lat) — pass directly to 'world' (ITRS)
-        ax.plot(*coastlines(), color="0.5", linewidth=0.5, **PLT_ARGS)
-    else:
-        plot_continents_icrs(ax, true_gmst)
-
-    # skymap credible regions (50 % and 90 %) for PLOT_FREQ only
-    skymap = skymaps[PLOT_FREQ]
-    dA = lsm_moc.uniq2pixarea(skymap["UNIQ"])
-    dP = skymap["PROBDENSITY"] * dA
-    cls = 100 * lsm_postprocess.find_greedy_credible_levels(dP, skymap["PROBDENSITY"])
-    CONTOUR_LEVELS = [50, 90]
-    cs = ax.contour_hpx(
-        (Table({"UNIQ": skymap["UNIQ"], "CLS": cls}), "ICRS"),
-        colors="k",
-        linewidths=0.5,
-        levels=CONTOUR_LEVELS,
-        order="nearest-neighbor",
-    )
-    fmt = r"%g\%%"
-    plt.clabel(cs, fmt=fmt, fontsize=6, inline=True)
-
-    # Annotate credible-region areas (mirrors ligo-skymap-plot --annotate).
-    sr_to_deg2 = u.sr.to(u.deg ** 2)
-    _sort_idx = np.flipud(np.argsort(skymap["PROBDENSITY"]))
-    _areas = lsm_postprocess.interp_greedy_credible_levels(
-        CONTOUR_LEVELS, cls[_sort_idx], np.cumsum(dA[_sort_idx]), right=4 * np.pi
-    )
-    _ann_lines = [
-        f"{int(np.round(p))}% area: {_format_area(a * sr_to_deg2)} deg²"
-        for p, a in zip(CONTOUR_LEVELS, _areas)
-    ]
-    ax.text(
-        0.99,
-        0.99,
-        "\n".join(_ann_lines),
-        transform=ax.transAxes,
-        ha="right",
-        va="top",
-        fontsize=10,
-        family="monospace",
-        bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.7),
-    )
-
-    # Convert PROBDENSITY from per-sr to per-deg² so the dynamic range is
-    # finite and imshow scales the colormap correctly (matches ligo_skymap_plot).
-    skymap["PROBDENSITY"] = skymap["PROBDENSITY"] / sr_to_deg2
-
-    img = ax.imshow_hpx(
-        (skymap, "ICRS"), vmin=0, cmap="cylon", order="nearest-neighbor"
-    )
-
-    # Build a cylon variant whose alpha ramps from 0 (transparent at vmin) to
-    # 1 (opaque at vmax), so zero-probability pixels are invisible and the
-    # timing rings remain visible beneath the map at any zorder.
-    # _rgba = plt.get_cmap("cylon")(np.linspace(0, 1, 256))
-    # _rgba[:, 3] = np.linspace(0, 1, 256)
-    # _cylon_alpha = LinearSegmentedColormap.from_list("cylon_alpha", _rgba)
-
-    # img = ax.imshow_hpx(
-    #     (skymap, "ICRS"), vmin=0, cmap=_cylon_alpha,
-    #     order="nearest-neighbor", zorder=200
-    # )
-
-    # timing circles — one color per ring pair, inline label along the curve
-    # _ring_colors = plt.get_cmap('tab10')(np.linspace(0, 0.3, len(RING_PAIRS)))
-    _ring_colors = plt.get_cmap("viridis")(np.linspace(0, 1, len(RING_PAIRS)))
-    _label_fracs = 4 * [
-        0.85,
-        0.50,
-        0.75,
-    ]  # fractional position along ring for each label
-    for (d1, d2), color, frac in zip(RING_PAIRS, _ring_colors, _label_fracs):
-        ras, decs, _, _ = rings[(d1, d2)]
-        label = f"{d1}-{d2}"
-
-        if TIMING_SIGMA_MS is not None:
-            # Draw annulus: sample time delays from N(τ_true, σ²) and overlay rings
-            sigma_tau = TIMING_SIGMA_MS * 1e-3
-            true_tau = detectors[d1].time_delay(
-                detectors[d2].vertex, ra=true_ra, dec=true_dec, t_event=true_obstime
+        for freq_str in freq_dirs:
+            fits_path = os.path.join(
+                args.base_path,
+                freq_str,
+                "fits",
+                f"sim_id_{args.injection_number}.fits",
             )
-            # clip to the physical range [-D/c, D/c] so arcsin is always valid
-            D = np.linalg.norm(detectors[d2].vertex - detectors[d1].vertex)
-            max_tau = D / 3e8
-            np.random.seed(42)
-            tau_samples = np.clip(
-                np.random.normal(true_tau, sigma_tau, N_ANNULUS),
-                -max_tau + 1e-9,
-                max_tau - 1e-9,
-            )
-            for tau in tau_samples:
-                s_ras, s_decs = detectors[d1].sky_location(
-                    detectors[d2].vertex, time_delay=tau, t_event=true_obstime
-                )
-                s_ras = s_ras % (2 * np.pi)
-                if GEO:
-                    s_lons = np.rad2deg((s_ras - true_gmst) % (2 * np.pi))
-                else:
-                    s_lons = np.rad2deg(s_ras)
-                ax.scatter(
-                    s_lons,
-                    np.rad2deg(s_decs),
-                    color=color,
-                    s=1.5,
-                    alpha=0.1,
-                    zorder=9,
-                    **PLT_ARGS,
-                )
+            if os.path.exists(fits_path):
+                skymaps[int(freq_str)] = skymap_fits.read_sky_map(fits_path, moc=True)
 
-        # Convert ICRS (RA/Dec radians) → native projection coordinates (degrees)
-        if GEO:
-            lons = np.rad2deg((ras - true_gmst) % (2 * np.pi))
+        if not skymaps:
+            raise FileNotFoundError(
+                f"No FITS files found for injection {args.injection_number} "
+                f"in {args.base_path}"
+            )
+        if args.plot_freq not in skymaps:
+            raise KeyError(
+                f"Requested --plot-freq {args.plot_freq} Hz not found. "
+                f"Available: {sorted(skymaps)}"
+            )
+        print(f"Skymaps found at frequencies (Hz): {sorted(skymaps)}")
+
+    # ── precompute timing circles ─────────────────────────────────────────────
+    rings = {
+        (d1, d2): get_ring_w_coloring(d1, d2, true_ra, true_dec, true_obstime)
+        for d1, d2 in ring_pairs
+    }
+    activated_ifos = set(np.array(ring_pairs).flatten())
+
+    # ── plot ──────────────────────────────────────────────────────────────────
+    projection = "geo globe" if args.geo else "astro degrees mollweide"
+
+    with rc_context(
+        {"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth": 3}
+    ):
+        fig = plt.figure(figsize=(9, 9) if args.geo else (14, 7))
+
+        if args.geo:
+            if args.geo_center == "auto":
+                src_lon_deg = np.rad2deg((true_ra - true_gmst) % (2 * np.pi))
+                geo_center = f"{src_lon_deg:.2f}d +23d"
+            else:
+                geo_center = args.geo_center
+            ax = fig.add_subplot(
+                projection=projection,
+                obstime=Time(true_obstime, format="gps"),
+                center=geo_center,
+            )
         else:
-            lons = np.rad2deg(ras)
-        lats = np.rad2deg(decs)
-        ax.scatter(lons, lats, s=1, color=color, zorder=10, **PLT_ARGS)
-        # Inline label: rotate text to match the local tangent direction
-        idx = int(frac * len(ras)) % len(ras)
-        step = max(3, len(ras) // 60)
-        i0, i1 = (idx - step) % len(ras), (idx + step) % len(ras)
-        dlon = lons[i1] - lons[i0]
-        dlat = lats[i1] - lats[i0]
-        # wrap to (-180, 180] to handle 0/360 boundary
-        dlon = (dlon + 180) % 360 - 180
-        # both projections invert the x-axis, so the angle formula is the same
-        angle = np.rad2deg(np.arctan2(dlat, dlon))
-        # Both projections invert the x-axis, so increasing lon moves LEFT on screen.
-        # Negate dlon so the angle is in screen space: arctan2(screen_dy, screen_dx).
-        # angle = np.rad2deg(np.arctan2(dlat, -dlon))
-        # angle = np.rad2deg(np.arctan2(dlat, dlon+90))
-        ax.text(
-            lons[idx],
-            lats[idx],
-            f" {label} ",
-            transform=ax.get_transform("world"),
-            fontsize=9,
-            ha="center",
-            va="center",
-            rotation=angle,  # TODO: decide whether to comment or not -> leave, is fine for most cases
-            rotation_mode="anchor",
-            color=color,
-            fontweight="bold",
-            # bbox=dict(boxstyle='square,pad=0.1', fc='white', ec='none', alpha=0.85),
-            zorder=20,
+            ax = fig.add_subplot(projection=projection)
+            ax.invert_xaxis()
+
+        PLT_ARGS = dict(transform=ax.get_transform("world"))
+
+        if not args.geo:
+            ax.set_aspect("equal")
+        ax.set_facecolor(plt.get_cmap("cylon")(0.0))
+        ax.grid()
+
+        # continents
+        if args.geo:
+            ax.plot(*coastlines(), color="0.5", linewidth=0.5, **PLT_ARGS)
+        else:
+            plot_continents_icrs(ax, true_gmst)
+
+        # skymap
+        if skymaps:
+            skymap = skymaps[args.plot_freq]
+            dA = lsm_moc.uniq2pixarea(skymap["UNIQ"])
+            dP = skymap["PROBDENSITY"] * dA
+            cls = 100 * lsm_postprocess.find_greedy_credible_levels(
+                dP, skymap["PROBDENSITY"]
+            )
+            cs = ax.contour_hpx(
+                (Table({"UNIQ": skymap["UNIQ"], "CLS": cls}), "ICRS"),
+                colors="k",
+                linewidths=0.5,
+                levels=args.contour_levels,
+                order="nearest-neighbor",
+            )
+            fmt = r"%g\%%"
+            plt.clabel(cs, fmt=fmt, fontsize=6, inline=True)
+
+            sr_to_deg2 = u.sr.to(u.deg ** 2)
+            _sort_idx = np.flipud(np.argsort(skymap["PROBDENSITY"]))
+            _areas = lsm_postprocess.interp_greedy_credible_levels(
+                args.contour_levels,
+                cls[_sort_idx],
+                np.cumsum(dA[_sort_idx]),
+                right=4 * np.pi,
+            )
+            _ann_lines = [
+                f"{int(np.round(p))}% area: {_format_area(a * sr_to_deg2)} deg²"
+                for p, a in zip(args.contour_levels, _areas)
+            ]
+            ax.text(
+                0.99,
+                0.99,
+                "\n".join(_ann_lines),
+                transform=ax.transAxes,
+                ha="right",
+                va="top",
+                fontsize=10,
+                family="monospace",
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.7),
+            )
+
+            skymap["PROBDENSITY"] = skymap["PROBDENSITY"] / sr_to_deg2
+            ax.imshow_hpx(
+                (skymap, "ICRS"), vmin=0, cmap="cylon", order="nearest-neighbor"
+            )
+
+        # timing circles
+        _ring_colors = plt.get_cmap("viridis")(np.linspace(0, 1, len(ring_pairs)))
+        _label_fracs = (4 * [0.85, 0.50, 0.75])[: len(ring_pairs)]
+        np.random.seed(args.seed)
+
+        for (d1, d2), color, frac in zip(ring_pairs, _ring_colors, _label_fracs):
+            ras, decs, _, _ = rings[(d1, d2)]
+            label = f"{d1}-{d2}"
+
+            if args.timing_sigma_ms is not None:
+                sigma_tau = args.timing_sigma_ms * 1e-3
+                true_tau = detectors[d1].time_delay(
+                    detectors[d2].vertex, ra=true_ra, dec=true_dec, t_event=true_obstime
+                )
+                D = np.linalg.norm(detectors[d2].vertex - detectors[d1].vertex)
+                max_tau = D / 3e8
+                tau_samples = np.clip(
+                    np.random.normal(true_tau, sigma_tau, args.n_annulus),
+                    -max_tau + 1e-9,
+                    max_tau - 1e-9,
+                )
+                for tau in tau_samples:
+                    s_ras, s_decs = detectors[d1].sky_location(
+                        detectors[d2].vertex, time_delay=tau, t_event=true_obstime
+                    )
+                    s_ras = s_ras % (2 * np.pi)
+                    s_lons = (
+                        np.rad2deg((s_ras - true_gmst) % (2 * np.pi))
+                        if args.geo
+                        else np.rad2deg(s_ras)
+                    )
+                    ax.scatter(
+                        s_lons,
+                        np.rad2deg(s_decs),
+                        color=color,
+                        s=1.5,
+                        alpha=0.1,
+                        zorder=9,
+                        **PLT_ARGS,
+                    )
+
+            lons = (
+                np.rad2deg((ras - true_gmst) % (2 * np.pi))
+                if args.geo
+                else np.rad2deg(ras)
+            )
+            lats = np.rad2deg(decs)
+            ax.scatter(lons, lats, s=1, color=color, zorder=10, **PLT_ARGS)
+
+            # inline label
+            idx = int(frac * len(ras)) % len(ras)
+            step = max(3, len(ras) // 60)
+            i0, i1 = (idx - step) % len(ras), (idx + step) % len(ras)
+            dlon = (lons[i1] - lons[i0] + 180) % 360 - 180
+            dlat = lats[i1] - lats[i0]
+            angle = np.rad2deg(np.arctan2(dlat, -dlon))
+            ax.text(
+                lons[idx],
+                lats[idx],
+                f" {label} ",
+                transform=ax.get_transform("world"),
+                fontsize=9,
+                ha="center",
+                va="center",
+                rotation=angle,
+                rotation_mode="anchor",
+                color=color,
+                fontweight="bold",
+                zorder=20,
+            )
+
+        # true source
+        src_lon = (
+            np.rad2deg((true_ra - true_gmst) % (2 * np.pi))
+            if args.geo
+            else np.rad2deg(true_ra)
+        )
+        ax.plot(
+            src_lon,
+            np.rad2deg(true_dec),
+            "*",
+            markerfacecolor="white",
+            markeredgecolor="black",
+            markersize=12,
+            zorder=100,
+            **PLT_ARGS,
         )
 
-    # true source location
-    _src_lon = (
-        np.rad2deg((true_ra - true_gmst) % (2 * np.pi)) if GEO else np.rad2deg(true_ra)
-    )
-    ax.plot(
-        _src_lon,
-        np.rad2deg(true_dec),
-        "*",
-        markerfacecolor="white",
-        markeredgecolor="black",
-        markersize=12,
-        zorder=100,
-        **PLT_ARGS,
-    )
+        # detector markers
+        LABEL_ARGS = dict(ha="right", va="bottom", fontsize=8, **PLT_ARGS)
+        for name in activated_ifos:
+            geo_lon, geo_lat = DETECTOR_POSITION[name]
+            if args.geo:
+                plot_lon, plot_lat = geo_lon, geo_lat
+            else:
+                plot_lon = np.rad2deg((np.deg2rad(geo_lon) + true_gmst) % (2 * np.pi))
+                plot_lat = geo_lat
+            plot_ifo(ax, plot_lon, plot_lat, size=24, **PLT_ARGS)
+            ax.text(plot_lon, plot_lat, name, **LABEL_ARGS)
 
-    # detector locations
-    LABEL_ARGS = dict(ha="right", va="bottom", fontsize=8, **PLT_ARGS)
-    for name in ACTIVATED_IFOS:
-        geo_lon, geo_lat = DETECTOR_POSITION[name]  # always geographic
-        if GEO:
-            plot_lon, plot_lat = geo_lon, geo_lat
+        outline_text(ax)
+
+        ax.set_title(
+            f"Injection {args.injection_number}  |  "
+            f"RA = {np.rad2deg(true_ra):.1f}°   Dec = {np.rad2deg(true_dec):.1f}°   "
+            f"GPS = {true_obstime:.0f}",
+            fontsize=12,
+        )
+
+        plt.tight_layout()
+
+        if not args.no_save:
+            if args.output:
+                out_path = args.output
+            else:
+                det_label = "".join(sorted({n[0] for n in activated_ifos})).lower()
+                out_path = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    f"timing_circle_inj{args.injection_number}"
+                    f"_f{args.plot_freq}_{det_label}"
+                    + ("_annulus" if args.timing_sigma_ms is not None else "")
+                    + ("_geo" if args.geo else "")
+                    + ".png",
+                )
+            plt.savefig(out_path, dpi=args.dpi, bbox_inches="tight")
+            print(f"Saved → {out_path}")
+
+        if not args.no_show:
+            plt.show()
         else:
-            plot_lon = np.rad2deg((np.deg2rad(geo_lon) + true_gmst) % (2 * np.pi))
-            plot_lat = geo_lat
-        plot_ifo(ax, plot_lon, plot_lat, size=24, **PLT_ARGS)
-        ax.text(plot_lon, plot_lat, name, **LABEL_ARGS)
+            plt.close()
 
-    outline_text(ax)
 
-    ax.set_title(
-        f"Injection {INJECTION_NUMBER}  |  "
-        f"RA = {np.rad2deg(true_ra):.1f}°   Dec = {np.rad2deg(true_dec):.1f}°   "
-        f"GPS = {true_obstime:.0f}",
-        fontsize=12,
-    )
-
-    plt.tight_layout()
-    det_label = "".join([n[0] for n in sorted(ACTIVATED_IFOS)]).lower()
-    out_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        f"timing_circle_inj{INJECTION_NUMBER}_f{PLOT_FREQ}_{det_label}"
-        + ("_w_unc" if TIMING_SIGMA_MS is not None else "")
-        + ("_geo" if GEO else "")
-        + ".png",
-    )
-    plt.savefig(out_path, dpi=300, bbox_inches='tight')
-    print(f"Saved → {out_path}")
-    plt.show()
+if __name__ == "__main__":
+    main()
