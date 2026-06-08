@@ -51,10 +51,23 @@ def build_parser():
         description=__doc__,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument(
-        "injection_number",
+    src_group = p.add_mutually_exclusive_group(required=True)
+    src_group.add_argument(
+        "--injection-number", "-n",
         type=int,
-        help="Simulation ID to plot",
+        default=None,
+        dest="injection_number",
+        metavar="ID",
+        help="Simulation ID; loads true sky position and GPS time from the stats file.",
+    )
+    src_group.add_argument(
+        "--sky-pos",
+        nargs=3,
+        type=float,
+        default=None,
+        metavar=("RA_DEG", "DEC_DEG", "GPS"),
+        help="True sky position and GPS time directly: RA [deg], Dec [deg], GPS [s]. "
+             "Skips stats-file lookup; implies --no-skymap unless --base-path is also set.",
     )
     p.add_argument(
         "--base-path",
@@ -335,25 +348,35 @@ def main(argv=None):
             ring_pairs.append((d1, d2))
 
     # ── load injection parameters ─────────────────────────────────────────────
-    stats = pd.read_csv(
-        os.path.join(args.base_path, "stats", "combined_stats.dat"),
-        sep="\t",
-        index_col=0,
-    )
-    row = stats[stats["simulation_id"] == args.injection_number].iloc[0]
-    true_ra, true_dec = ast.literal_eval(row["ra_dec"])  # radians
-    true_obstime = float(row["time"])  # GPS seconds
-    true_gmst = lal.GreenwichMeanSiderealTime(true_obstime) % (2 * np.pi)
+    row = None
+    if args.injection_number is not None:
+        stats = pd.read_csv(
+            os.path.join(args.base_path, "stats", "combined_stats.dat"),
+            sep="\t",
+            index_col=0,
+        )
+        row = stats[stats["simulation_id"] == args.injection_number].iloc[0]
+        true_ra, true_dec = ast.literal_eval(row["ra_dec"])  # radians
+        true_obstime = float(row["time"])  # GPS seconds
+        print(
+            f"Injection {args.injection_number}: "
+            f"RA={np.rad2deg(true_ra):.2f}°  Dec={np.rad2deg(true_dec):.2f}°  "
+            f"GPS={true_obstime:.0f}"
+        )
+    else:
+        ra_deg, dec_deg, true_obstime = args.sky_pos
+        true_ra  = np.deg2rad(ra_deg)
+        true_dec = np.deg2rad(dec_deg)
+        print(
+            f"Sky position: RA={ra_deg:.2f}°  Dec={dec_deg:.2f}°  GPS={true_obstime:.0f}"
+        )
 
-    print(
-        f"Injection {args.injection_number}: "
-        f"RA={np.rad2deg(true_ra):.2f}°  Dec={np.rad2deg(true_dec):.2f}°  "
-        f"GPS={true_obstime:.0f}"
-    )
+    true_gmst = lal.GreenwichMeanSiderealTime(true_obstime) % (2 * np.pi)
 
     # ── load skymaps ──────────────────────────────────────────────────────────
     skymaps = {}
-    if not args.no_skymap:
+    load_skymap = not args.no_skymap and args.injection_number is not None
+    if load_skymap:
         freq_dirs = sorted(
             [d for d in os.listdir(args.base_path) if d.isdigit()], key=int
         )
@@ -481,9 +504,15 @@ def main(argv=None):
             if args.timing_uncertainty:
                 if args.timing_sigma_ms is not None:
                     sigma_ms = args.timing_sigma_ms
-                else:
+                elif row is not None:
                     sigma_ms = compute_pair_sigma_ms(d1, d2, row)
                     print(f"  {d1}-{d2}: auto σ_τ = {sigma_ms:.3f} ms")
+                else:
+                    raise ValueError(
+                        f"Cannot auto-compute timing uncertainty for {d1}-{d2}: "
+                        "no stats row available when using --sky-pos. "
+                        "Provide --timing-sigma-ms explicitly."
+                    )
                 sigma_tau = sigma_ms * 1e-3
                 true_tau = detectors[d1].time_delay(
                     detectors[d2].vertex, ra=true_ra, dec=true_dec, t_event=true_obstime
