@@ -156,7 +156,13 @@ def build_parser():
         "--output",
         "-o",
         default=None,
-        help="Path for the saved PNG (default: auto-named in the script directory)",
+        help="Full path for the saved PNG (overrides --outdir and auto-naming)",
+    )
+    p.add_argument(
+        "--outdir",
+        default=None,
+        metavar="DIR",
+        help="Directory for the auto-named PNG (default: script directory)",
     )
     p.add_argument(
         "--dpi",
@@ -619,10 +625,11 @@ def main(argv=None):
                 out_path = args.output
             else:
                 det_label = "".join(sorted({n[0] for n in activated_ifos})).lower()
+                inj_tag = f"inj{args.injection_number}" if args.injection_number is not None else "manual"
+                out_dir = args.outdir if args.outdir is not None else os.path.dirname(os.path.abspath(__file__))
                 out_path = os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)),
-                    f"timing_circle_inj{args.injection_number}"
-                    f"_f{args.plot_freq}_{det_label}"
+                    out_dir,
+                    f"timing_circle_{inj_tag}_f{args.plot_freq}_{det_label}"
                     + ("_annulus" if args.timing_uncertainty else "")
                     + ("_geo" if args.geo else "")
                     + ".png",
