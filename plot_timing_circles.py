@@ -63,6 +63,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib import rc_context
 from matplotlib.path import Path
+from matplotlib.transforms import Affine2D
 from astropy.table import Table
 from astropy.time import Time
 import astropy.units as u
@@ -244,12 +245,14 @@ _LAL_IFO = {
     "I1": lal.LALDetectorIndexLIODIFF,
 }
 DETECTOR_POSITION = {}
+DETECTOR_ARM_AZ = {}
 for _name in IFO_NAMES:
     _det = lal.CachedDetectors[_LAL_IFO[_name]]
     DETECTOR_POSITION[_name] = (
         np.rad2deg(_det.frDetector.vertexLongitudeRadians),
         np.rad2deg(_det.frDetector.vertexLatitudeRadians),
     )
+    DETECTOR_ARM_AZ[_name] = _det.frDetector.xArmAzimuthRadians
 
 # Effective RMS bandwidth [Hz] per detector for timing-uncertainty estimation.
 # σ_τ = 1 / (2π · ρ · f_rms); values approximate O5 sensitivity from 20 Hz lower cutoff.
@@ -380,10 +383,33 @@ _G = max(np.max(np.abs(p.vertices)) for p in (IFO_BEAMS, IFO_OPTICS))
 IFO_BEAMS, IFO_OPTICS = _pad(IFO_BEAMS, _G), _pad(IFO_OPTICS, _G)
 
 
-def plot_ifo(ax, lon, lat, size=46, beam_color="red", optic_color="k", **kw):
+def rotate_path(path, angle_deg):
+    return path.transformed(Affine2D().rotate_deg(angle_deg))
+
+
+def arm_screen_angle(ax, plot_lon, plot_lat, arm_az_rad, geo_lat_deg, epsilon=0.3):
+    """Screen rotation angle (CCW from right, degrees) for a detector arm.
+
+    Works for both Mollweide and geo-globe projections by finite-differencing
+    the projected positions of the arm endpoint and the detector vertex.
+    `arm_az_rad` is the x-arm azimuth (clockwise from geographic North).
+    `geo_lat_deg` is the geographic latitude of the detector.
+    """
+    lat_rad = np.deg2rad(geo_lat_deg)
+    dlat = epsilon * np.cos(arm_az_rad)
+    dlon = epsilon * np.sin(arm_az_rad) / np.cos(lat_rad)
+    t = ax.get_transform("world")
+    p0 = t.transform([[plot_lon, plot_lat]])
+    p1 = t.transform([[plot_lon + dlon, plot_lat + dlat]])
+    return np.rad2deg(np.arctan2(p1[0, 1] - p0[0, 1], p1[0, 0] - p0[0, 0]))
+
+
+def plot_ifo(ax, lon, lat, size=46, beam_color="red", optic_color="k", rotation=0.0, **kw):
+    beams = rotate_path(IFO_BEAMS, rotation)
+    optics = rotate_path(IFO_OPTICS, rotation)
     common = dict(markersize=size, linestyle="none", markeredgewidth=0, **kw)
-    ax.plot(lon, lat, marker=IFO_BEAMS, markerfacecolor=beam_color, **common)
-    ax.plot(lon, lat, marker=IFO_OPTICS, markerfacecolor=optic_color, **common)
+    ax.plot(lon, lat, marker=beams, markerfacecolor=beam_color, **common)
+    ax.plot(lon, lat, marker=optics, markerfacecolor=optic_color, **common)
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -704,7 +730,8 @@ def main(argv=None):
             else:
                 plot_lon = np.rad2deg((np.deg2rad(geo_lon) + true_gmst) % (2 * np.pi))
                 plot_lat = geo_lat
-            plot_ifo(ax, plot_lon, plot_lat, size=24, **PLT_ARGS)
+            arm_rot = arm_screen_angle(ax, plot_lon, plot_lat, DETECTOR_ARM_AZ[name], geo_lat)
+            plot_ifo(ax, plot_lon, plot_lat, size=24, rotation=arm_rot, **PLT_ARGS)
             ax.text(plot_lon, plot_lat, name, **LABEL_ARGS)
 
         outline_text(ax)
