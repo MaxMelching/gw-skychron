@@ -558,7 +558,7 @@ def main(argv=None):
             i0, i1 = (idx - step) % len(ras), (idx + step) % len(ras)
             dlon = (lons[i1] - lons[i0] + 180) % 360 - 180
             dlat = lats[i1] - lats[i0]
-            angle = np.rad2deg(np.arctan2(dlat, -dlon))
+            angle = np.rad2deg(np.arctan2(dlat, dlon))
             ax.text(
                 lons[idx],
                 lats[idx],
