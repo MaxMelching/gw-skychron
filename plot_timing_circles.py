@@ -482,7 +482,10 @@ def main(argv=None):
     projection = "geo globe" if args.geo else "astro degrees mollweide"
 
     with rc_context(
-        {"xtick.labelsize": 14, "ytick.labelsize": 14, "lines.linewidth": 3}
+        {
+            "xtick.labelsize": 24, "ytick.labelsize": 24, "lines.linewidth": 3,
+            "font.family": "sans-serif", "font.sans-serif": ["Georgia", "DejaVu Sans"],  # With fallback
+         }
     ):
         fig = plt.figure(figsize=(9, 9) if args.geo else (14, 7))
 
@@ -551,9 +554,8 @@ def main(argv=None):
                 transform=ax.transAxes,
                 ha="right",
                 va="top",
-                fontsize=10,
-                family="monospace",
-                bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.7),
+                fontsize=20,
+                bbox=dict(boxstyle="round,pad=0.4", fc="white"),
             )
 
             skymap["PROBDENSITY"] = skymap["PROBDENSITY"] / sr_to_deg2
@@ -603,12 +605,18 @@ def main(argv=None):
                         if args.geo
                         else np.rad2deg(s_ras)
                     )
-                    ax.scatter(
-                        s_lons,
-                        np.rad2deg(s_decs),
+
+                    s_decs_deg = np.rad2deg(s_decs)
+                    jumps = np.where(np.abs(np.diff(s_lons)) > 180)[0] + 1
+                    s_lons_p = np.insert(s_lons.astype(float), jumps, np.nan)
+                    s_decs_p = np.insert(s_decs_deg.astype(float), jumps, np.nan)
+                    ax.plot(
+                        s_lons_p,
+                        s_decs_p,
                         color=color,
-                        s=1.5,
-                        alpha=0.1,
+                        linewidth=10,
+                        alpha=1 / args.n_annulus,
+                        # alpha=2 / args.n_annulus,
                         zorder=9,
                         **PLT_ARGS,
                     )
@@ -619,7 +627,12 @@ def main(argv=None):
                 else np.rad2deg(ras)
             )
             lats = np.rad2deg(decs)
-            ax.scatter(lons, lats, s=1, color=color, zorder=10, **PLT_ARGS)
+
+            jumps = np.where(np.abs(np.diff(lons)) > 180)[0] + 1
+            lons_p = np.insert(lons.astype(float), jumps, np.nan)
+            lats_p = np.insert(lats.astype(float), jumps, np.nan)
+            ax.plot(lons_p, lats_p, linewidth=2, color=color, zorder=10, **PLT_ARGS)
+
 
             # inline label
             idx = int(frac * len(ras)) % len(ras)
@@ -628,17 +641,23 @@ def main(argv=None):
             dlon = (lons[i1] - lons[i0] + 180) % 360 - 180
             dlat = lats[i1] - lats[i0]
             angle = np.rad2deg(np.arctan2(dlat, dlon))
+
+            import matplotlib.colors as mcolors
+            darker = tuple(c * 0.5 for c in mcolors.to_rgba(color)[:3]) + (1.0,)
+
             ax.text(
                 lons[idx],
                 lats[idx],
                 f" {label} ",
                 transform=ax.get_transform("world"),
-                fontsize=9,
+                fontsize=20,
                 ha="center",
                 va="center",
                 rotation=angle,
                 rotation_mode="anchor",
-                color=color,
+                # color=color,
+                # color="black",
+                color=darker,
                 fontweight="bold",
                 zorder=20,
             )
@@ -661,7 +680,7 @@ def main(argv=None):
         )
 
         # detector markers
-        LABEL_ARGS = dict(ha="right", va="bottom", fontsize=8, **PLT_ARGS)
+        LABEL_ARGS = dict(ha="right", va="bottom", fontsize=12, **PLT_ARGS)
         for name in activated_ifos:
             geo_lon, geo_lat = DETECTOR_POSITION[name]
             if args.geo:
@@ -678,7 +697,8 @@ def main(argv=None):
             f"Injection {args.injection_number}  |  "
             f"RA = {np.rad2deg(true_ra):.1f}°   Dec = {np.rad2deg(true_dec):.1f}°   "
             f"GPS = {true_obstime:.0f}",
-            fontsize=12,
+            fontsize=26,
+            pad=20,
         )
 
         plt.tight_layout()
