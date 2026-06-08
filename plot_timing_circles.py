@@ -85,7 +85,8 @@ def build_parser():
     )
     src_group = p.add_mutually_exclusive_group(required=True)
     src_group.add_argument(
-        "--injection-number", "-n",
+        "--injection-number",
+        "-n",
         type=int,
         default=None,
         dest="injection_number",
@@ -99,28 +100,28 @@ def build_parser():
         default=None,
         metavar=("RA_DEG", "DEC_DEG", "GPS"),
         help="True sky position and GPS time directly: RA [deg], Dec [deg], GPS [s]. "
-             "Skips stats-file lookup. Pass --skymap-file to overlay a skymap.",
+        "Skips stats-file lookup. Pass --skymap-file to overlay a skymap.",
     )
     p.add_argument(
         "--base-path",
         default=None,
         metavar="DIR",
         help="Results directory containing stats/ and {freq}/fits/ subdirs. "
-             "When omitted, use --stats-file and/or --skymap-file instead.",
+        "When omitted, use --stats-file and/or --skymap-file instead.",
     )
     p.add_argument(
         "--stats-file",
         default=None,
         metavar="PATH",
         help="Path to the stats CSV directly (alternative to --base-path for injection lookup). "
-             "The injection number is still used to select the correct row.",
+        "The injection number is still used to select the correct row.",
     )
     p.add_argument(
         "--skymap-file",
         default=None,
         metavar="PATH",
         help="Path to a single FITS skymap (alternative to --base-path skymap discovery). "
-             "Skips frequency-directory scanning.",
+        "Skips frequency-directory scanning.",
     )
     p.add_argument(
         "--plot-freq",
@@ -136,7 +137,7 @@ def build_parser():
         default=None,
         metavar="D1-D2",
         help="Explicit detector pairs for timing circles, e.g. L1-H1 L1-V1 H1-V1 H1-K1. "
-             "Mutually exclusive with --detectors.",
+        "Mutually exclusive with --detectors.",
     )
     pair_group.add_argument(
         "--detectors",
@@ -144,8 +145,8 @@ def build_parser():
         default=None,
         metavar="DET",
         help="List of detectors; all pairwise combinations are used as ring pairs, "
-             "e.g. --detectors H1 L1 V1 K1 produces six pairs. "
-             "Mutually exclusive with --ring-pairs.",
+        "e.g. --detectors H1 L1 V1 K1 produces six pairs. "
+        "Mutually exclusive with --ring-pairs.",
     )
     p.add_argument(
         "--geo",
@@ -163,8 +164,8 @@ def build_parser():
         "--timing-uncertainty",
         action="store_true",
         help="Draw annuli around each timing circle by sampling τ ~ N(τ_true, σ²). "
-             "σ is taken from --timing-sigma-ms if provided, otherwise auto-computed "
-             "per pair from per-detector SNR and hardcoded effective bandwidth.",
+        "σ is taken from --timing-sigma-ms if provided, otherwise auto-computed "
+        "per pair from per-detector SNR and hardcoded effective bandwidth.",
     )
     p.add_argument(
         "--timing-sigma-ms",
@@ -172,7 +173,7 @@ def build_parser():
         default=None,
         metavar="MS",
         help="Override timing uncertainty σ [ms] for all pairs (requires --timing-uncertainty). "
-             "If omitted, σ is auto-computed from SNR and TIMING_BANDWIDTH_HZ.",
+        "If omitted, σ is auto-computed from SNR and TIMING_BANDWIDTH_HZ.",
     )
     p.add_argument(
         "--n-annulus",
@@ -309,7 +310,7 @@ def compute_pair_sigma_ms(d1, d2, row, n_det):
     rho_per_det = _network_snr(row) / np.sqrt(n_det)
     s1 = 1.0 / (2 * np.pi * rho_per_det * TIMING_BANDWIDTH_HZ[d1])
     s2 = 1.0 / (2 * np.pi * rho_per_det * TIMING_BANDWIDTH_HZ[d2])
-    return 1000.0 * np.sqrt(s1**2 + s2**2)
+    return 1000.0 * np.sqrt(s1 ** 2 + s2 ** 2)
 
 
 def _format_area(area):
@@ -396,15 +397,23 @@ def main(argv=None):
                 raise ValueError(f"Unknown detector '{det}'. Known: {IFO_NAMES}")
         ring_pairs = list(itertools.combinations(args.detectors, 2))
     else:
-        tokens = args.ring_pairs if args.ring_pairs is not None else ["L1-H1", "L1-V1", "H1-V1"]
+        tokens = (
+            args.ring_pairs
+            if args.ring_pairs is not None
+            else ["L1-H1", "L1-V1", "H1-V1"]
+        )
         ring_pairs = []
         for token in tokens:
             parts = token.split("-")
             if len(parts) != 2:
-                raise ValueError(f"Invalid ring pair '{token}'; expected format 'D1-D2'")
+                raise ValueError(
+                    f"Invalid ring pair '{token}'; expected format 'D1-D2'"
+                )
             d1, d2 = parts
             if d1 not in IFO_NAMES or d2 not in IFO_NAMES:
-                raise ValueError(f"Unknown detector in pair '{token}'. Known: {IFO_NAMES}")
+                raise ValueError(
+                    f"Unknown detector in pair '{token}'. Known: {IFO_NAMES}"
+                )
             ring_pairs.append((d1, d2))
 
     n_det = len({det for pair in ring_pairs for det in pair})
@@ -431,7 +440,7 @@ def main(argv=None):
         )
     else:
         ra_deg, dec_deg, true_obstime = args.sky_pos
-        true_ra  = np.deg2rad(ra_deg)
+        true_ra = np.deg2rad(ra_deg)
         true_dec = np.deg2rad(dec_deg)
         print(
             f"Sky position: RA={ra_deg:.2f}°  Dec={dec_deg:.2f}°  GPS={true_obstime:.0f}"
@@ -443,7 +452,9 @@ def main(argv=None):
     skymaps = {}
     if not args.no_skymap:
         if args.skymap_file is not None:
-            skymaps[args.plot_freq] = skymap_fits.read_sky_map(args.skymap_file, moc=True)
+            skymaps[args.plot_freq] = skymap_fits.read_sky_map(
+                args.skymap_file, moc=True
+            )
             print(f"Skymap loaded from {args.skymap_file}")
         elif args.base_path is not None and args.injection_number is not None:
             freq_dirs = sorted(
@@ -457,7 +468,9 @@ def main(argv=None):
                     f"sim_id_{args.injection_number}.fits",
                 )
                 if os.path.exists(fits_path):
-                    skymaps[int(freq_str)] = skymap_fits.read_sky_map(fits_path, moc=True)
+                    skymaps[int(freq_str)] = skymap_fits.read_sky_map(
+                        fits_path, moc=True
+                    )
 
             if not skymaps:
                 raise FileNotFoundError(
@@ -483,9 +496,12 @@ def main(argv=None):
 
     with rc_context(
         {
-            "xtick.labelsize": 24, "ytick.labelsize": 24, "lines.linewidth": 3,
-            "font.family": "sans-serif", "font.sans-serif": ["Georgia", "DejaVu Sans"],  # With fallback
-         }
+            "xtick.labelsize": 24,
+            "ytick.labelsize": 24,
+            "lines.linewidth": 3,
+            "font.family": "sans-serif",
+            "font.sans-serif": ["Georgia", "DejaVu Sans"],  # With fallback
+        }
     ):
         fig = plt.figure(figsize=(9, 9) if args.geo else (14, 7))
 
@@ -633,7 +649,6 @@ def main(argv=None):
             lats_p = np.insert(lats.astype(float), jumps, np.nan)
             ax.plot(lons_p, lats_p, linewidth=2, color=color, zorder=10, **PLT_ARGS)
 
-
             # inline label
             idx = int(frac * len(ras)) % len(ras)
             step = max(3, len(ras) // 60)
@@ -643,6 +658,7 @@ def main(argv=None):
             angle = np.rad2deg(np.arctan2(dlat, dlon))
 
             import matplotlib.colors as mcolors
+
             darker = tuple(c * 0.5 for c in mcolors.to_rgba(color)[:3]) + (1.0,)
 
             ax.text(
@@ -708,8 +724,16 @@ def main(argv=None):
                 out_path = args.output
             else:
                 det_label = "".join(sorted({n[0] for n in activated_ifos})).lower()
-                inj_tag = f"inj{args.injection_number}" if args.injection_number is not None else "manual"
-                out_dir = args.outdir if args.outdir is not None else os.path.dirname(os.path.abspath(__file__))
+                inj_tag = (
+                    f"inj{args.injection_number}"
+                    if args.injection_number is not None
+                    else "manual"
+                )
+                out_dir = (
+                    args.outdir
+                    if args.outdir is not None
+                    else os.path.dirname(os.path.abspath(__file__))
+                )
                 out_path = os.path.join(
                     out_dir,
                     f"timing_circle_{inj_tag}_f{args.plot_freq}_{det_label}"
