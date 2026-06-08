@@ -99,19 +99,26 @@ def build_parser():
         "or pass any string accepted by SkyCoord, e.g. '-90d +23d'",
     )
     p.add_argument(
+        "--timing-uncertainty",
+        action="store_true",
+        help="Draw annuli around each timing circle by sampling τ ~ N(τ_true, σ²). "
+             "σ is taken from --timing-sigma-ms if provided, otherwise auto-computed "
+             "per pair from per-detector SNR and hardcoded effective bandwidth.",
+    )
+    p.add_argument(
         "--timing-sigma-ms",
         type=float,
         default=None,
         metavar="MS",
-        help="Draw annuli by sampling time delays from N(τ_true, σ²) with this σ [ms]. "
-        "Omit for single rings.",
+        help="Override timing uncertainty σ [ms] for all pairs (requires --timing-uncertainty). "
+             "If omitted, σ is auto-computed from SNR and TIMING_BANDWIDTH_HZ.",
     )
     p.add_argument(
         "--n-annulus",
         type=int,
         default=50,
         metavar="N",
-        help="Number of sampled rings per pair when --timing-sigma-ms is set",
+        help="Number of sampled rings per pair when --timing-uncertainty is set",
     )
     p.add_argument(
         "--seed",
@@ -176,6 +183,16 @@ for _name in IFO_NAMES:
         np.rad2deg(_det.frDetector.vertexLatitudeRadians),
     )
 
+# Effective RMS bandwidth [Hz] per detector for timing-uncertainty estimation.
+# σ_τ = 1 / (2π · ρ · f_rms); values approximate O5 sensitivity from 20 Hz lower cutoff.
+TIMING_BANDWIDTH_HZ = {
+    "H1": 35.0,
+    "L1": 35.0,
+    "V1": 30.0,
+    "K1": 25.0,
+    "I1": 25.0,
+}
+
 
 # ── helper functions ──────────────────────────────────────────────────────────
 def get_ring_w_coloring(det1, det2, ra, dec, t_event):
@@ -200,6 +217,26 @@ def get_ring_w_coloring(det1, det2, ra, dec, t_event):
         F1.append(_antenna(det1))
         F2.append(_antenna(det2))
     return possible_ras, possible_decs, np.array(F1), np.array(F2)
+
+
+def _snr_for_det(det, row):
+    """Return per-detector SNR from a stats row, trying common column naming conventions."""
+    for col in (f"{det}_snr", f"{det.lower()}_snr", f"snr_{det}", f"snr_{det.lower()}"):
+        if col in row.index:
+            return float(row[col])
+    raise KeyError(
+        f"Cannot find SNR column for '{det}'. "
+        f"Tried: {det}_snr, {det.lower()}_snr, snr_{det}, snr_{det.lower()}. "
+        f"Available columns: {list(row.index)}"
+    )
+
+
+def compute_pair_sigma_ms(d1, d2, row):
+    """Timing uncertainty [ms] for a detector pair: σ = sqrt(σ_1² + σ_2²),
+    where σ_i = 1 / (2π · ρ_i · f_rms_i)."""
+    s1 = 1.0 / (2 * np.pi * _snr_for_det(d1, row) * TIMING_BANDWIDTH_HZ[d1])
+    s2 = 1.0 / (2 * np.pi * _snr_for_det(d2, row) * TIMING_BANDWIDTH_HZ[d2])
+    return 1000.0 * np.sqrt(s1**2 + s2**2)
 
 
 def _format_area(area):
@@ -441,8 +478,13 @@ def main(argv=None):
             ras, decs, _, _ = rings[(d1, d2)]
             label = f"{d1}-{d2}"
 
-            if args.timing_sigma_ms is not None:
-                sigma_tau = args.timing_sigma_ms * 1e-3
+            if args.timing_uncertainty:
+                if args.timing_sigma_ms is not None:
+                    sigma_ms = args.timing_sigma_ms
+                else:
+                    sigma_ms = compute_pair_sigma_ms(d1, d2, row)
+                    print(f"  {d1}-{d2}: auto σ_τ = {sigma_ms:.3f} ms")
+                sigma_tau = sigma_ms * 1e-3
                 true_tau = detectors[d1].time_delay(
                     detectors[d2].vertex, ra=true_ra, dec=true_dec, t_event=true_obstime
                 )
@@ -552,7 +594,7 @@ def main(argv=None):
                     os.path.dirname(os.path.abspath(__file__)),
                     f"timing_circle_inj{args.injection_number}"
                     f"_f{args.plot_freq}_{det_label}"
-                    + ("_annulus" if args.timing_sigma_ms is not None else "")
+                    + ("_annulus" if args.timing_uncertainty else "")
                     + ("_geo" if args.geo else "")
                     + ".png",
                 )
