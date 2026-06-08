@@ -3,19 +3,51 @@
 """
 Plot timing circles and sky-localization credible regions for one injection.
 
-Basic usage:
-    python plot_timing_circles.py 4 --base-path ../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many
+Basic usage (injection number + base path):
+    python plot_timing_circles.py -n 4 \\
+        --base-path ../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many
 
-Full example:
-    python plot_timing_circles.py 4 \\
+Separate stats and skymap files (no base path):
+    python plot_timing_circles.py -n 4 \\
+        --stats-file /path/to/combined_stats.dat \\
+        --skymap-file /path/to/sim_id_4.fits
+
+All detectors from a network, with auto-computed timing annuli:
+    python plot_timing_circles.py -n 4 \\
+        --base-path ../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many \\
+        --detectors H1 L1 V1 \\
+        --timing-uncertainty \\
+        --n-annulus 80
+
+Override timing uncertainty with an explicit sigma:
+    python plot_timing_circles.py -n 4 \\
+        --base-path ../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many \\
+        --ring-pairs L1-H1 L1-V1 H1-V1 \\
+        --timing-uncertainty --timing-sigma-ms 0.42 \\
+        --n-annulus 50
+
+Provide sky position directly (no injection lookup):
+    python plot_timing_circles.py \\
+        --sky-pos 45.0 -30.0 1234567890 \\
+        --ring-pairs L1-H1 L1-V1 \\
+        --timing-uncertainty --timing-sigma-ms 0.5
+
+Sky position with a skymap overlay:
+    python plot_timing_circles.py \\
+        --sky-pos 45.0 -30.0 1234567890 \\
+        --skymap-file /path/to/skymap.fits \\
+        --ring-pairs L1-H1 L1-V1 \\
+        --timing-uncertainty --timing-sigma-ms 0.5
+
+Full example with geo projection and custom output directory:
+    python plot_timing_circles.py -n 4 \\
         --base-path ../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many \\
         --plot-freq 56 \\
         --ring-pairs L1-H1 L1-V1 H1-V1 \\
-        --timing-sigma-ms 0.42 \\
-        --n-annulus 50 \\
+        --timing-uncertainty \\
         --contour-levels 50 90 \\
         --geo \\
-        --output my_plot.png
+        --outdir /tmp/plots
 """
 
 import argparse
@@ -67,12 +99,28 @@ def build_parser():
         default=None,
         metavar=("RA_DEG", "DEC_DEG", "GPS"),
         help="True sky position and GPS time directly: RA [deg], Dec [deg], GPS [s]. "
-             "Skips stats-file lookup; implies --no-skymap unless --base-path is also set.",
+             "Skips stats-file lookup. Pass --skymap-file to overlay a skymap.",
     )
     p.add_argument(
         "--base-path",
-        default="../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many",
-        help="Path to the results directory containing stats/ and freq/fits/ subdirs",
+        default=None,
+        metavar="DIR",
+        help="Results directory containing stats/ and {freq}/fits/ subdirs. "
+             "When omitted, use --stats-file and/or --skymap-file instead.",
+    )
+    p.add_argument(
+        "--stats-file",
+        default=None,
+        metavar="PATH",
+        help="Path to the stats CSV directly (alternative to --base-path for injection lookup). "
+             "The injection number is still used to select the correct row.",
+    )
+    p.add_argument(
+        "--skymap-file",
+        default=None,
+        metavar="PATH",
+        help="Path to a single FITS skymap (alternative to --base-path skymap discovery). "
+             "Skips frequency-directory scanning.",
     )
     p.add_argument(
         "--plot-freq",
@@ -356,11 +404,15 @@ def main(argv=None):
     # ── load injection parameters ─────────────────────────────────────────────
     row = None
     if args.injection_number is not None:
-        stats = pd.read_csv(
-            os.path.join(args.base_path, "stats", "combined_stats.dat"),
-            sep="\t",
-            index_col=0,
-        )
+        if args.stats_file is not None:
+            stats_path = args.stats_file
+        elif args.base_path is not None:
+            stats_path = os.path.join(args.base_path, "stats", "combined_stats.dat")
+        else:
+            raise ValueError(
+                "--injection-number requires either --base-path or --stats-file"
+            )
+        stats = pd.read_csv(stats_path, sep="\t", index_col=0)
         row = stats[stats["simulation_id"] == args.injection_number].iloc[0]
         true_ra, true_dec = ast.literal_eval(row["ra_dec"])  # radians
         true_obstime = float(row["time"])  # GPS seconds
@@ -381,32 +433,35 @@ def main(argv=None):
 
     # ── load skymaps ──────────────────────────────────────────────────────────
     skymaps = {}
-    load_skymap = not args.no_skymap and args.injection_number is not None
-    if load_skymap:
-        freq_dirs = sorted(
-            [d for d in os.listdir(args.base_path) if d.isdigit()], key=int
-        )
-        for freq_str in freq_dirs:
-            fits_path = os.path.join(
-                args.base_path,
-                freq_str,
-                "fits",
-                f"sim_id_{args.injection_number}.fits",
+    if not args.no_skymap:
+        if args.skymap_file is not None:
+            skymaps[args.plot_freq] = skymap_fits.read_sky_map(args.skymap_file, moc=True)
+            print(f"Skymap loaded from {args.skymap_file}")
+        elif args.base_path is not None and args.injection_number is not None:
+            freq_dirs = sorted(
+                [d for d in os.listdir(args.base_path) if d.isdigit()], key=int
             )
-            if os.path.exists(fits_path):
-                skymaps[int(freq_str)] = skymap_fits.read_sky_map(fits_path, moc=True)
+            for freq_str in freq_dirs:
+                fits_path = os.path.join(
+                    args.base_path,
+                    freq_str,
+                    "fits",
+                    f"sim_id_{args.injection_number}.fits",
+                )
+                if os.path.exists(fits_path):
+                    skymaps[int(freq_str)] = skymap_fits.read_sky_map(fits_path, moc=True)
 
-        if not skymaps:
-            raise FileNotFoundError(
-                f"No FITS files found for injection {args.injection_number} "
-                f"in {args.base_path}"
-            )
-        if args.plot_freq not in skymaps:
-            raise KeyError(
-                f"Requested --plot-freq {args.plot_freq} Hz not found. "
-                f"Available: {sorted(skymaps)}"
-            )
-        print(f"Skymaps found at frequencies (Hz): {sorted(skymaps)}")
+            if not skymaps:
+                raise FileNotFoundError(
+                    f"No FITS files found for injection {args.injection_number} "
+                    f"in {args.base_path}"
+                )
+            if args.plot_freq not in skymaps:
+                raise KeyError(
+                    f"Requested --plot-freq {args.plot_freq} Hz not found. "
+                    f"Available: {sorted(skymaps)}"
+                )
+            print(f"Skymaps found at frequencies (Hz): {sorted(skymaps)}")
 
     # ── precompute timing circles ─────────────────────────────────────────────
     rings = {
