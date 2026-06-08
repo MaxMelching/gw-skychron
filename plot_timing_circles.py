@@ -20,6 +20,7 @@ Full example:
 
 import argparse
 import ast
+import itertools
 import os
 import sys
 
@@ -67,12 +68,23 @@ def build_parser():
         metavar="HZ",
         help="Frequency [Hz] of the skymap to display (must exist in BASE_PATH/HZ/fits/)",
     )
-    p.add_argument(
+    pair_group = p.add_mutually_exclusive_group()
+    pair_group.add_argument(
         "--ring-pairs",
         nargs="+",
-        default=["L1-H1", "L1-V1", "H1-V1"],
+        default=None,
         metavar="D1-D2",
-        help="Detector pairs for timing circles, e.g. L1-H1 L1-V1 H1-V1 H1-K1",
+        help="Explicit detector pairs for timing circles, e.g. L1-H1 L1-V1 H1-V1 H1-K1. "
+             "Mutually exclusive with --detectors.",
+    )
+    pair_group.add_argument(
+        "--detectors",
+        nargs="+",
+        default=None,
+        metavar="DET",
+        help="List of detectors; all pairwise combinations are used as ring pairs, "
+             "e.g. --detectors H1 L1 V1 K1 produces six pairs. "
+             "Mutually exclusive with --ring-pairs.",
     )
     p.add_argument(
         "--geo",
@@ -267,16 +279,23 @@ def plot_ifo(ax, lon, lat, size=46, beam_color="red", optic_color="k", **kw):
 def main(argv=None):
     args = build_parser().parse_args(argv)
 
-    # ── parse ring pairs ──────────────────────────────────────────────────────
-    ring_pairs = []
-    for token in args.ring_pairs:
-        parts = token.split("-")
-        if len(parts) != 2:
-            raise ValueError(f"Invalid ring pair '{token}'; expected format 'D1-D2'")
-        d1, d2 = parts
-        if d1 not in IFO_NAMES or d2 not in IFO_NAMES:
-            raise ValueError(f"Unknown detector in pair '{token}'. Known: {IFO_NAMES}")
-        ring_pairs.append((d1, d2))
+    # ── resolve ring pairs ────────────────────────────────────────────────────
+    if args.detectors is not None:
+        for det in args.detectors:
+            if det not in IFO_NAMES:
+                raise ValueError(f"Unknown detector '{det}'. Known: {IFO_NAMES}")
+        ring_pairs = list(itertools.combinations(args.detectors, 2))
+    else:
+        tokens = args.ring_pairs if args.ring_pairs is not None else ["L1-H1", "L1-V1", "H1-V1"]
+        ring_pairs = []
+        for token in tokens:
+            parts = token.split("-")
+            if len(parts) != 2:
+                raise ValueError(f"Invalid ring pair '{token}'; expected format 'D1-D2'")
+            d1, d2 = parts
+            if d1 not in IFO_NAMES or d2 not in IFO_NAMES:
+                raise ValueError(f"Unknown detector in pair '{token}'. Known: {IFO_NAMES}")
+            ring_pairs.append((d1, d2))
 
     # ── load injection parameters ─────────────────────────────────────────────
     stats = pd.read_csv(
