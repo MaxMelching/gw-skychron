@@ -286,23 +286,29 @@ def get_ring_w_coloring(det1, det2, ra, dec, t_event):
     return possible_ras, possible_decs, np.array(F1), np.array(F2)
 
 
-def _snr_for_det(det, row):
-    """Return per-detector SNR from a stats row, trying common column naming conventions."""
-    for col in (f"{det}_snr", f"{det.lower()}_snr", f"snr_{det}", f"snr_{det.lower()}"):
+def _network_snr(row):
+    """Extract network SNR from a stats row, trying common column names."""
+    for col in ("snr", "network_snr", "rho", "SNR"):
         if col in row.index:
+            print(row[col])
             return float(row[col])
     raise KeyError(
-        f"Cannot find SNR column for '{det}'. "
-        f"Tried: {det}_snr, {det.lower()}_snr, snr_{det}, snr_{det.lower()}. "
+        f"Cannot find network SNR column. "
+        f"Tried: snr, network_snr, rho, SNR. "
         f"Available columns: {list(row.index)}"
     )
 
 
-def compute_pair_sigma_ms(d1, d2, row):
-    """Timing uncertainty [ms] for a detector pair: σ = sqrt(σ_1² + σ_2²),
-    where σ_i = 1 / (2π · ρ_i · f_rms_i)."""
-    s1 = 1.0 / (2 * np.pi * _snr_for_det(d1, row) * TIMING_BANDWIDTH_HZ[d1])
-    s2 = 1.0 / (2 * np.pi * _snr_for_det(d2, row) * TIMING_BANDWIDTH_HZ[d2])
+def compute_pair_sigma_ms(d1, d2, row, n_det):
+    """Timing uncertainty [ms] for a detector pair.
+
+    Approximates per-detector SNR as ρ_net / √n_det (equal-SNR assumption),
+    then combines in quadrature: σ_τ = √(σ_1² + σ_2²),
+    where σ_i = 1 / (2π · ρ_i · f_rms_i).
+    """
+    rho_per_det = _network_snr(row) / np.sqrt(n_det)
+    s1 = 1.0 / (2 * np.pi * rho_per_det * TIMING_BANDWIDTH_HZ[d1])
+    s2 = 1.0 / (2 * np.pi * rho_per_det * TIMING_BANDWIDTH_HZ[d2])
     return 1000.0 * np.sqrt(s1**2 + s2**2)
 
 
@@ -400,6 +406,8 @@ def main(argv=None):
             if d1 not in IFO_NAMES or d2 not in IFO_NAMES:
                 raise ValueError(f"Unknown detector in pair '{token}'. Known: {IFO_NAMES}")
             ring_pairs.append((d1, d2))
+
+    n_det = len({det for pair in ring_pairs for det in pair})
 
     # ── load injection parameters ─────────────────────────────────────────────
     row = None
@@ -566,8 +574,8 @@ def main(argv=None):
                 if args.timing_sigma_ms is not None:
                     sigma_ms = args.timing_sigma_ms
                 elif row is not None:
-                    sigma_ms = compute_pair_sigma_ms(d1, d2, row)
-                    print(f"  {d1}-{d2}: auto σ_τ = {sigma_ms:.3f} ms")
+                    sigma_ms = compute_pair_sigma_ms(d1, d2, row, n_det)
+                    print(f"  {d1}-{d2}: auto σ_τ = {sigma_ms:.3f} ms (ρ_net/√{n_det})")
                 else:
                     raise ValueError(
                         f"Cannot auto-compute timing uncertainty for {d1}-{d2}: "
