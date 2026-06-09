@@ -103,6 +103,14 @@ def build_parser():
         help="True sky position and GPS time directly: RA [deg], Dec [deg], GPS [s]. "
         "Skips stats-file lookup. Pass --skymap-file to overlay a skymap.",
     )
+    src_group.add_argument(
+        "--bilby-json",
+        default=None,
+        metavar="PATH",
+        help="Path to a bilby result JSON file. Reads injection parameters (true sky "
+        "position, GPS time, per-detector SNRs) and posterior samples (ra, dec) "
+        "directly. Replaces --injection-number + --stats-file.",
+    )
     p.add_argument(
         "--stats-file",
         default=None,
@@ -437,6 +445,8 @@ def main(argv=None):
 
     # ── load injection parameters ─────────────────────────────────────────────
     row = None
+    posterior_ra = posterior_dec = None
+    bilby_label = None
     if args.injection_number is not None:
         if args.stats_file is None:
             raise ValueError("--injection-number requires --stats-file")
@@ -449,6 +459,29 @@ def main(argv=None):
             f"Injection {args.injection_number}: "
             f"RA={np.rad2deg(true_ra):.2f}°  Dec={np.rad2deg(true_dec):.2f}°  "
             f"GPS={true_obstime:.0f}"
+        )
+    elif args.bilby_json is not None:
+        import bilby
+        result = bilby.core.result.read_in_result(args.bilby_json)
+        ip = result.injection_parameters
+        true_ra = float(ip["ra"])
+        true_dec = float(ip["dec"])
+        true_obstime = float(ip["geocent_time"])
+        # Build a row-like Series so compute_pair_sigma_ms works unchanged.
+        # Network SNR is computed from whichever {det}_optimal_snr keys exist.
+        det_snrs = [v for k, v in ip.items() if k.endswith("_optimal_snr")]
+        if det_snrs:
+            rho_net = float(np.sqrt(sum(s ** 2 for s in det_snrs)))
+            row = pd.Series({"snr": rho_net})
+        posterior_ra = result.posterior["ra"].to_numpy()
+        posterior_dec = result.posterior["dec"].to_numpy()
+        bilby_label = result.label or os.path.splitext(
+            os.path.basename(args.bilby_json)
+        )[0]
+        print(
+            f"Bilby result '{bilby_label}': "
+            f"RA={np.rad2deg(true_ra):.2f}°  Dec={np.rad2deg(true_dec):.2f}°  "
+            f"GPS={true_obstime:.0f}  N_posterior={len(posterior_ra)}"
         )
     else:
         ra_deg, dec_deg, true_obstime = args.sky_pos
@@ -563,6 +596,25 @@ def main(argv=None):
             skymap["PROBDENSITY"] = skymap["PROBDENSITY"] / sr_to_deg2
             ax.imshow_hpx(
                 (skymap, "ICRS"), vmin=0, cmap="cylon", order="nearest-neighbor"
+            )
+
+        # bilby posterior samples
+        if posterior_ra is not None:
+            post_lons = (
+                np.rad2deg((posterior_ra - true_gmst) % (2 * np.pi))
+                if args.geo
+                else np.rad2deg(posterior_ra)
+            )
+            post_lats = np.rad2deg(posterior_dec)
+            ax.scatter(
+                post_lons,
+                post_lats,
+                s=1,
+                color="C0",
+                alpha=0.15,
+                zorder=5,
+                rasterized=True,
+                **PLT_ARGS,
             )
 
         # timing circles
@@ -696,8 +748,14 @@ def main(argv=None):
 
         outline_text(ax)
 
+        if args.bilby_json is not None:
+            title_prefix = bilby_label
+        elif args.injection_number is not None:
+            title_prefix = f"Injection {args.injection_number}"
+        else:
+            title_prefix = "Manual"
         ax.set_title(
-            f"Injection {args.injection_number}  |  "
+            f"{title_prefix}  |  "
             f"RA = {np.rad2deg(true_ra):.1f}°   Dec = {np.rad2deg(true_dec):.1f}°   "
             f"GPS = {true_obstime:.0f}",
             fontsize=26,
@@ -711,11 +769,12 @@ def main(argv=None):
                 out_path = args.output
             else:
                 det_label = "".join(sorted({n[0] for n in activated_ifos})).lower()
-                inj_tag = (
-                    f"inj{args.injection_number}"
-                    if args.injection_number is not None
-                    else "manual"
-                )
+                if args.injection_number is not None:
+                    inj_tag = f"inj{args.injection_number}"
+                elif args.bilby_json is not None:
+                    inj_tag = bilby_label
+                else:
+                    inj_tag = "manual"
                 out_dir = (
                     args.outdir
                     if args.outdir is not None
