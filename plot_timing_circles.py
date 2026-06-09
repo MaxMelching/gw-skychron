@@ -56,6 +56,7 @@ import itertools
 import os
 import sys
 
+import healpy as hp
 import lal
 import numpy as np
 import pandas as pd
@@ -189,6 +190,14 @@ def build_parser():
         help="Random seed for annulus sampling (ensures reproducible figures)",
     )
     p.add_argument(
+        "--posterior-smooth-deg",
+        type=float,
+        default=1.5,
+        metavar="DEG",
+        help="Gaussian smoothing width [deg] applied to the bilby posterior HEALPix map "
+        "(nside=128). Set to 0 to disable smoothing.",
+    )
+    p.add_argument(
         "--contour-levels",
         nargs="+",
         type=float,
@@ -315,6 +324,68 @@ def compute_pair_sigma_ms(d1, d2, row, n_det):
     return 1000.0 * np.sqrt(s1 ** 2 + s2 ** 2)
 
 
+def _plot_skymap(ax, sm, contour_levels, plot_freq, show_annotation):
+    """Render a MOC sky map (UNIQ + PROBDENSITY table) onto ax."""
+    sr_to_deg2 = u.sr.to(u.deg ** 2)
+    dA = lsm_moc.uniq2pixarea(sm["UNIQ"])
+    dP = sm["PROBDENSITY"] * dA
+    cls = 100 * lsm_postprocess.find_greedy_credible_levels(dP, sm["PROBDENSITY"])
+    cs = ax.contour_hpx(
+        (Table({"UNIQ": sm["UNIQ"], "CLS": cls}), "ICRS"),
+        colors="k",
+        linewidths=0.5,
+        levels=contour_levels,
+        order="nearest-neighbor",
+    )
+    plt.clabel(cs, fmt=r"%g%%", fontsize=10, inline=True)
+
+    if show_annotation:
+        _sort_idx = np.flipud(np.argsort(sm["PROBDENSITY"]))
+        _areas = lsm_postprocess.interp_greedy_credible_levels(
+            contour_levels,
+            cls[_sort_idx],
+            np.cumsum(dA[_sort_idx]),
+            right=4 * np.pi,
+        )
+        _ann_lines = ([rf"$f$ = {plot_freq} Hz"] if plot_freq is not None else []) + [
+            f"{int(np.round(p))}% area: {_format_area(a * sr_to_deg2)} deg²"
+            for p, a in zip(contour_levels, _areas)
+        ]
+        ax.text(
+            0.88,
+            1.0,
+            "\n".join(_ann_lines),
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=20,
+            bbox=dict(boxstyle="round,pad=0.4", fc="white"),
+        )
+
+    sm["PROBDENSITY"] = sm["PROBDENSITY"] / sr_to_deg2
+    ax.imshow_hpx((sm, "ICRS"), vmin=0, cmap="cylon", order="nearest-neighbor")
+
+
+def _posterior_to_skymap(ra, dec, smooth_deg=1.5, nside=128):
+    """Bin posterior (ra, dec) samples [rad] into a HEALPix PROBDENSITY Table.
+
+    Uses a Gaussian beam of width smooth_deg applied via healpy.smoothing so
+    that the result can be fed directly to ax.imshow_hpx / ax.contour_hpx.
+    UNIQ indices follow the nested-order MOC convention: UNIQ = 4*nside^2 + ipix.
+    """
+    npix = hp.nside2npix(nside)
+    ipix = hp.ang2pix(nside, np.pi / 2 - dec, ra, nest=True)
+    counts = np.bincount(ipix, minlength=npix).astype(float)
+    if smooth_deg > 0:
+        counts = hp.reorder(counts, n2r=True)
+        counts = hp.smoothing(counts, sigma=np.deg2rad(smooth_deg), verbose=False)
+        counts = hp.reorder(np.maximum(counts, 0.0), r2n=True)
+    prob = counts / counts.sum()
+    prob_density = prob / hp.nside2pixarea(nside)
+    uniq = (4 * nside ** 2 + np.arange(npix)).astype(np.int64)
+    return Table({"UNIQ": uniq, "PROBDENSITY": prob_density})
+
+
 def _format_area(area):
     if area <= 100:
         return np.format_float_positional(area, precision=3, fractional=False, trim="-")
@@ -403,7 +474,9 @@ def arm_screen_angle(ax, plot_lon, plot_lat, arm_az_rad, geo_lat_deg, epsilon=0.
     return np.rad2deg(np.arctan2(p1[0, 1] - p0[0, 1], p1[0, 0] - p0[0, 0]))
 
 
-def plot_ifo(ax, lon, lat, size=46, beam_color="red", optic_color="k", rotation=0.0, **kw):
+def plot_ifo(
+    ax, lon, lat, size=46, beam_color="red", optic_color="k", rotation=0.0, **kw
+):
     beams = rotate_path(IFO_BEAMS, rotation)
     optics = rotate_path(IFO_OPTICS, rotation)
     common = dict(markersize=size, linestyle="none", markeredgewidth=0, **kw)
@@ -462,6 +535,7 @@ def main(argv=None):
         )
     elif args.bilby_json is not None:
         import bilby
+
         result = bilby.core.result.read_in_result(args.bilby_json)
         ip = result.injection_parameters
         true_ra = float(ip["ra"])
@@ -475,9 +549,9 @@ def main(argv=None):
             row = pd.Series({"snr": rho_net})
         posterior_ra = result.posterior["ra"].to_numpy()
         posterior_dec = result.posterior["dec"].to_numpy()
-        bilby_label = result.label or os.path.splitext(
-            os.path.basename(args.bilby_json)
-        )[0]
+        bilby_label = (
+            result.label or os.path.splitext(os.path.basename(args.bilby_json))[0]
+        )
         print(
             f"Bilby result '{bilby_label}': "
             f"RA={np.rad2deg(true_ra):.2f}°  Dec={np.rad2deg(true_dec):.2f}°  "
@@ -551,70 +625,23 @@ def main(argv=None):
 
         # skymap
         if skymap is not None:
-            dA = lsm_moc.uniq2pixarea(skymap["UNIQ"])
-            dP = skymap["PROBDENSITY"] * dA
-            cls = 100 * lsm_postprocess.find_greedy_credible_levels(
-                dP, skymap["PROBDENSITY"]
-            )
-            cs = ax.contour_hpx(
-                (Table({"UNIQ": skymap["UNIQ"], "CLS": cls}), "ICRS"),
-                colors="k",
-                linewidths=0.5,
-                levels=args.contour_levels,
-                order="nearest-neighbor",
-            )
-            fmt = r"%g%%"
-            plt.clabel(cs, fmt=fmt, fontsize=10, inline=True)
-
-            sr_to_deg2 = u.sr.to(u.deg ** 2)
-            _sort_idx = np.flipud(np.argsort(skymap["PROBDENSITY"]))
-            _areas = lsm_postprocess.interp_greedy_credible_levels(
-                args.contour_levels,
-                cls[_sort_idx],
-                np.cumsum(dA[_sort_idx]),
-                right=4 * np.pi,
-            )
-            _ann_lines = (
-                [rf"$f$ = {args.plot_freq} Hz"]
-                if args.plot_freq is not None
-                else []
-            ) + [
-                f"{int(np.round(p))}% area: {_format_area(a * sr_to_deg2)} deg²"
-                for p, a in zip(args.contour_levels, _areas)
-            ]
-            ax.text(
-                0.88,
-                1.0,
-                "\n".join(_ann_lines),
-                transform=ax.transAxes,
-                ha="left",
-                va="top",
-                fontsize=20,
-                bbox=dict(boxstyle="round,pad=0.4", fc="white"),
+            _plot_skymap(
+                ax, skymap, args.contour_levels, args.plot_freq, show_annotation=True
             )
 
-            skymap["PROBDENSITY"] = skymap["PROBDENSITY"] / sr_to_deg2
-            ax.imshow_hpx(
-                (skymap, "ICRS"), vmin=0, cmap="cylon", order="nearest-neighbor"
-            )
-
-        # bilby posterior samples
+        # bilby posterior KDE skymap
         if posterior_ra is not None:
-            post_lons = (
-                np.rad2deg((posterior_ra - true_gmst) % (2 * np.pi))
-                if args.geo
-                else np.rad2deg(posterior_ra)
+            post_skymap = _posterior_to_skymap(
+                posterior_ra,
+                posterior_dec,
+                smooth_deg=args.posterior_smooth_deg,
             )
-            post_lats = np.rad2deg(posterior_dec)
-            ax.scatter(
-                post_lons,
-                post_lats,
-                s=1,
-                color="C0",
-                alpha=0.15,
-                zorder=5,
-                rasterized=True,
-                **PLT_ARGS,
+            _plot_skymap(
+                ax,
+                post_skymap,
+                args.contour_levels,
+                args.plot_freq,
+                show_annotation=(skymap is None),
             )
 
         # timing circles
@@ -742,7 +769,9 @@ def main(argv=None):
             else:
                 plot_lon = np.rad2deg((np.deg2rad(geo_lon) + true_gmst) % (2 * np.pi))
                 plot_lat = geo_lat
-            arm_rot = arm_screen_angle(ax, plot_lon, plot_lat, DETECTOR_ARM_AZ[name], geo_lat)
+            arm_rot = arm_screen_angle(
+                ax, plot_lon, plot_lat, DETECTOR_ARM_AZ[name], geo_lat
+            )
             plot_ifo(ax, plot_lon, plot_lat, size=24, rotation=arm_rot, **PLT_ARGS)
             ax.text(plot_lon, plot_lat, name, **LABEL_ARGS)
 
