@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# Copyright (C) Eliot Finch -2026, Max Melching 2026
+
 import numpy as np
 
 # Manipulating file paths
@@ -16,6 +19,14 @@ import lal
 # Constants
 import scipy.constants as consts
 c = consts.c
+
+_LAL_IFO = {
+    "H1": lal.LALDetectorIndexLHODIFF,
+    "L1": lal.LALDetectorIndexLLODIFF,
+    "V1": lal.LALDetectorIndexVIRGODIFF,
+    "K1": lal.LALDetectorIndexKAGRADIFF,
+    "I1": lal.LALDetectorIndexLIODIFF,
+}
 
 
 class interferometer:
@@ -49,14 +60,10 @@ class interferometer:
         # self.dd = f'{cwd}/data/interferometers/'
         self.dd = f'{cwd}/'
 
-        # Load interferometer arm orientation and location data, see Table 1
-        # of https://arxiv.org/abs/gr-qc/0008066
-        self.vertex, nx, ny = np.loadtxt(self.dd+name+'.txt')
-
-        # Calculate the detector tensor from the arm orientations (equation B6
-        # in the reference)
-        self.detector_tensor = 0.5*(
-            np.einsum('i,j->ij', nx, nx) - np.einsum('i,j->ij', ny, ny))
+        # Load interferometer location and detector tensor from LAL
+        _det = lal.CachedDetectors[_LAL_IFO[name]]
+        self.vertex = np.array(_det.location)
+        self.detector_tensor = np.array(_det.response)
 
     def load_asd(self, asd_name):
         """
@@ -439,7 +446,9 @@ class interferometer:
         k = r.apply(m)
 
         # All possible source directions can be obtained by rotating k about n
-        angle_array = np.arange(0, 2*np.pi, 0.01)
+        # angle_array = np.arange(0, 2*np.pi, 0.01)
+        # angle_array = np.arange(0, 2*np.pi, 0.001)
+        angle_array = np.arange(0, 2*np.pi, 0.005)
 
         # We can store all the rotations at once like this
         r = R.from_rotvec(np.outer(angle_array, n))
