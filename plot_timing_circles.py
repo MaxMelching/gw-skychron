@@ -575,7 +575,7 @@ def main(argv=None):
                 order="nearest-neighbor",
             )
             fmt = r"%g\%%"
-            plt.clabel(cs, fmt=fmt, fontsize=6, inline=True)
+            plt.clabel(cs, fmt=fmt, fontsize=10, inline=True)
 
             sr_to_deg2 = u.sr.to(u.deg ** 2)
             _sort_idx = np.flipud(np.argsort(skymap["PROBDENSITY"]))
@@ -585,7 +585,7 @@ def main(argv=None):
                 np.cumsum(dA[_sort_idx]),
                 right=4 * np.pi,
             )
-            _ann_lines = [
+            _ann_lines = [f"$f = {freq_str} \, \mathrm{{Hz}}$"] + [
                 f"{int(np.round(p))}% area: {_format_area(a * sr_to_deg2)} deg²"
                 for p, a in zip(args.contour_levels, _areas)
             ]
