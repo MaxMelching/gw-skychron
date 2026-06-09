@@ -206,11 +206,6 @@ def build_parser():
         help="Credible-region contour levels in percent",
     )
     p.add_argument(
-        "--no-skymap",
-        action="store_true",
-        help="Skip loading and plotting the HEALPix skymap entirely",
-    )
-    p.add_argument(
         "--output",
         "-o",
         default=None,
@@ -569,7 +564,7 @@ def main(argv=None):
 
     # ── load skymap ───────────────────────────────────────────────────────────
     skymap = None
-    if not args.no_skymap and args.skymap_file is not None:
+    if args.skymap_file is not None:
         skymap = skymap_fits.read_sky_map(args.skymap_file, moc=True)
         print(f"Skymap loaded from {args.skymap_file}")
 
