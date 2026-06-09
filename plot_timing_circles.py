@@ -3,25 +3,23 @@
 """
 Plot timing circles and sky-localization credible regions for one injection.
 
-Basic usage (injection number + base path):
+Basic usage (injection number with explicit files):
     python plot_timing_circles.py -n 4 \\
-        --base-path ../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many
-
-Separate stats and skymap files (no base path):
-    python plot_timing_circles.py -n 4 \\
-        --stats-file /path/to/combined_stats.dat \\
-        --skymap-file /path/to/sim_id_4.fits
+        --stats-file /path/to/stats/combined_stats.dat \\
+        --skymap-file /path/to/56/fits/sim_id_4.fits
 
 All detectors from a network, with auto-computed timing annuli:
     python plot_timing_circles.py -n 4 \\
-        --base-path ../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many \\
+        --stats-file /path/to/stats/combined_stats.dat \\
+        --skymap-file /path/to/56/fits/sim_id_4.fits \\
         --detectors H1 L1 V1 \\
         --timing-uncertainty \\
         --n-annulus 80
 
 Override timing uncertainty with an explicit sigma:
     python plot_timing_circles.py -n 4 \\
-        --base-path ../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many \\
+        --stats-file /path/to/stats/combined_stats.dat \\
+        --skymap-file /path/to/56/fits/sim_id_4.fits \\
         --ring-pairs L1-H1 L1-V1 H1-V1 \\
         --timing-uncertainty --timing-sigma-ms 0.42 \\
         --n-annulus 50
@@ -40,8 +38,10 @@ Sky position with a skymap overlay:
         --timing-uncertainty --timing-sigma-ms 0.5
 
 Full example with geo projection and custom output directory:
-    python plot_timing_circles.py -n 4 \\
-        --base-path ../../../sky_localization/results/H1_O5_L1_O5_V1_O5_many \\
+    python plot_timing_circles.py \\
+        --stats-file /path/to/stats/combined_stats.dat \\
+        --skymap-file /path/to/56/fits/sim_id_4.fits \\
+        --injection-number 4 \\
         --plot-freq 56 \\
         --ring-pairs L1-H1 L1-V1 H1-V1 \\
         --timing-uncertainty \\
@@ -104,32 +104,23 @@ def build_parser():
         "Skips stats-file lookup. Pass --skymap-file to overlay a skymap.",
     )
     p.add_argument(
-        "--base-path",
-        default=None,
-        metavar="DIR",
-        help="Results directory containing stats/ and {freq}/fits/ subdirs. "
-        "When omitted, use --stats-file and/or --skymap-file instead.",
-    )
-    p.add_argument(
         "--stats-file",
         default=None,
         metavar="PATH",
-        help="Path to the stats CSV directly (alternative to --base-path for injection lookup). "
-        "The injection number is still used to select the correct row.",
+        help="Path to the stats CSV. The injection number selects the correct row.",
     )
     p.add_argument(
         "--skymap-file",
         default=None,
         metavar="PATH",
-        help="Path to a single FITS skymap (alternative to --base-path skymap discovery). "
-        "Skips frequency-directory scanning.",
+        help="Path to a FITS skymap to overlay.",
     )
     p.add_argument(
         "--plot-freq",
         type=int,
-        default=56,
+        default=None,
         metavar="HZ",
-        help="Frequency [Hz] of the skymap to display (must exist in BASE_PATH/HZ/fits/)",
+        help="Frequency [Hz] label for the output filename (optional).",
     )
     pair_group = p.add_mutually_exclusive_group()
     pair_group.add_argument(
@@ -447,14 +438,9 @@ def main(argv=None):
     # ── load injection parameters ─────────────────────────────────────────────
     row = None
     if args.injection_number is not None:
-        if args.stats_file is not None:
-            stats_path = args.stats_file
-        elif args.base_path is not None:
-            stats_path = os.path.join(args.base_path, "stats", "combined_stats.dat")
-        else:
-            raise ValueError(
-                "--injection-number requires either --base-path or --stats-file"
-            )
+        if args.stats_file is None:
+            raise ValueError("--injection-number requires --stats-file")
+        stats_path = args.stats_file
         stats = pd.read_csv(stats_path, sep="\t", index_col=0)
         row = stats[stats["simulation_id"] == args.injection_number].iloc[0]
         true_ra, true_dec = ast.literal_eval(row["ra_dec"])  # radians
@@ -474,41 +460,11 @@ def main(argv=None):
 
     true_gmst = lal.GreenwichMeanSiderealTime(true_obstime) % (2 * np.pi)
 
-    # ── load skymaps ──────────────────────────────────────────────────────────
-    skymaps = {}
-    if not args.no_skymap:
-        if args.skymap_file is not None:
-            skymaps[args.plot_freq] = skymap_fits.read_sky_map(
-                args.skymap_file, moc=True
-            )
-            print(f"Skymap loaded from {args.skymap_file}")
-        elif args.base_path is not None and args.injection_number is not None:
-            freq_dirs = sorted(
-                [d for d in os.listdir(args.base_path) if d.isdigit()], key=int
-            )
-            for freq_str in freq_dirs:
-                fits_path = os.path.join(
-                    args.base_path,
-                    freq_str,
-                    "fits",
-                    f"sim_id_{args.injection_number}.fits",
-                )
-                if os.path.exists(fits_path):
-                    skymaps[int(freq_str)] = skymap_fits.read_sky_map(
-                        fits_path, moc=True
-                    )
-
-            if not skymaps:
-                raise FileNotFoundError(
-                    f"No FITS files found for injection {args.injection_number} "
-                    f"in {args.base_path}"
-                )
-            if args.plot_freq not in skymaps:
-                raise KeyError(
-                    f"Requested --plot-freq {args.plot_freq} Hz not found. "
-                    f"Available: {sorted(skymaps)}"
-                )
-            print(f"Skymaps found at frequencies (Hz): {sorted(skymaps)}")
+    # ── load skymap ───────────────────────────────────────────────────────────
+    skymap = None
+    if not args.no_skymap and args.skymap_file is not None:
+        skymap = skymap_fits.read_sky_map(args.skymap_file, moc=True)
+        print(f"Skymap loaded from {args.skymap_file}")
 
     # ── precompute timing circles ─────────────────────────────────────────────
     rings = {
@@ -527,6 +483,7 @@ def main(argv=None):
             "lines.linewidth": 3,
             "font.family": "sans-serif",
             "font.sans-serif": ["Georgia", "DejaVu Sans"],  # With fallback
+            "mathtext.fontset": "cm",
         }
     ):
         fig = plt.figure(figsize=(9, 9) if args.geo else (14, 7))
@@ -560,8 +517,7 @@ def main(argv=None):
             plot_continents_icrs(ax, true_gmst)
 
         # skymap
-        if skymaps:
-            skymap = skymaps[args.plot_freq]
+        if skymap is not None:
             dA = lsm_moc.uniq2pixarea(skymap["UNIQ"])
             dP = skymap["PROBDENSITY"] * dA
             cls = 100 * lsm_postprocess.find_greedy_credible_levels(
@@ -574,7 +530,7 @@ def main(argv=None):
                 levels=args.contour_levels,
                 order="nearest-neighbor",
             )
-            fmt = r"%g\%%"
+            fmt = r"%g%%"
             plt.clabel(cs, fmt=fmt, fontsize=10, inline=True)
 
             sr_to_deg2 = u.sr.to(u.deg ** 2)
@@ -585,16 +541,20 @@ def main(argv=None):
                 np.cumsum(dA[_sort_idx]),
                 right=4 * np.pi,
             )
-            _ann_lines = [f"$f = {freq_str} \, \mathrm{{Hz}}$"] + [
+            _ann_lines = (
+                [rf"$f$ = {args.plot_freq} Hz"]
+                if args.plot_freq is not None
+                else []
+            ) + [
                 f"{int(np.round(p))}% area: {_format_area(a * sr_to_deg2)} deg²"
                 for p, a in zip(args.contour_levels, _areas)
             ]
             ax.text(
-                0.99,
-                0.99,
+                0.88,
+                1.0,
                 "\n".join(_ann_lines),
                 transform=ax.transAxes,
-                ha="right",
+                ha="left",
                 va="top",
                 fontsize=20,
                 bbox=dict(boxstyle="round,pad=0.4", fc="white"),
@@ -761,9 +721,10 @@ def main(argv=None):
                     if args.outdir is not None
                     else os.path.dirname(os.path.abspath(__file__))
                 )
+                freq_tag = f"_f{args.plot_freq}" if args.plot_freq is not None else ""
                 out_path = os.path.join(
                     out_dir,
-                    f"timing_circle_{inj_tag}_f{args.plot_freq}_{det_label}"
+                    f"timing_circle_{inj_tag}{freq_tag}_{det_label}"
                     + ("_annulus" if args.timing_uncertainty else "")
                     + ("_geo" if args.geo else "")
                     + ".png",
