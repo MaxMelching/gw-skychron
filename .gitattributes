@@ -1,0 +1,4 @@
+examples/*.dat filter=lfs diff=lfs merge=lfs -text
+examples/*.fits filter=lfs diff=lfs merge=lfs -text
+examples/*.json filter=lfs diff=lfs merge=lfs -text
+examples/*.png filter=lfs diff=lfs merge=lfs -text
