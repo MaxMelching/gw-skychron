@@ -48,6 +48,20 @@ Full example with geo projection and custom output directory:
         --contour-levels 50 90 \\
         --geo \\
         --outdir /tmp/plots
+
+Bilby result (posterior KDE skymap, auto-computed timing uncertainty):
+    python plot_timing_circles.py \\
+        --bilby-json /path/to/result.json \\
+        --detectors H1 V1 \\
+        --timing-uncertainty
+
+Bilby result with custom smoothing and explicit timing sigma:
+    python plot_timing_circles.py \\
+        --bilby-json /path/to/result.json \\
+        --detectors H1 V1 \\
+        --timing-uncertainty --timing-sigma-ms 0.5 \\
+        --posterior-smooth-deg 2.0 \\
+        --contour-levels 50 90
 """
 
 import argparse
@@ -373,7 +387,7 @@ def _posterior_to_skymap(ra, dec, smooth_deg=1.5, nside=128):
     counts = np.bincount(ipix, minlength=npix).astype(float)
     if smooth_deg > 0:
         counts = hp.reorder(counts, n2r=True)
-        counts = hp.smoothing(counts, sigma=np.deg2rad(smooth_deg), verbose=False)
+        counts = hp.smoothing(counts, sigma=np.deg2rad(smooth_deg))
         counts = hp.reorder(np.maximum(counts, 0.0), r2n=True)
     prob = counts / counts.sum()
     prob_density = prob / hp.nside2pixarea(nside)
