@@ -527,6 +527,7 @@ def main(argv=None):
 
     # ── load injection parameters ─────────────────────────────────────────────
     row = None
+    snr_n_det = n_det  # number of detectors that contributed to rho_net
     posterior_ra = posterior_dec = None
     bilby_label = None
     if args.injection_number is not None:
@@ -556,6 +557,7 @@ def main(argv=None):
         if det_snrs:
             rho_net = float(np.sqrt(sum(s ** 2 for s in det_snrs)))
             row = pd.Series({"snr": rho_net})
+            snr_n_det = len(det_snrs)
         posterior_ra = result.posterior["ra"].to_numpy()
         posterior_dec = result.posterior["dec"].to_numpy()
         bilby_label = (
@@ -666,8 +668,8 @@ def main(argv=None):
                 if args.timing_sigma_ms is not None:
                     sigma_ms = args.timing_sigma_ms
                 elif row is not None:
-                    sigma_ms = compute_pair_sigma_ms(d1, d2, row, n_det)
-                    print(f"  {d1}-{d2}: auto σ_τ = {sigma_ms:.3f} ms (ρ_net/√{n_det})")
+                    sigma_ms = compute_pair_sigma_ms(d1, d2, row, snr_n_det)
+                    print(f"  {d1}-{d2}: auto σ_τ = {sigma_ms:.3f} ms (ρ_net/√{snr_n_det})")
                 else:
                     raise ValueError(
                         f"Cannot auto-compute timing uncertainty for {d1}-{d2}: "

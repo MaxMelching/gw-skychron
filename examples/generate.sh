@@ -85,6 +85,7 @@ python ../plot_timing_circles.py \
     --bilby-json hv_true_snr_fixed_spins_nohom_zero_noise_result.json \
     --ring-pairs L1-H1 L1-V1 H1-V1 \
     --contour-levels 50 90 \
+    --timing-uncertainty --n-annulus 96 \
     --outdir . \
     --no-show
 
@@ -92,6 +93,5 @@ python ../plot_timing_circles.py \
 python ../plot_timing_circles.py \
     --sky-pos 97.2 -35.7 1187008882 \
     --ring-pairs L1-H1 L1-V1 H1-V1 \
-    --timing-uncertainty --timing-sigma-ms 0.5 \
     --geo \
     --outdir . \

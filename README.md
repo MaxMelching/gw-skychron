@@ -37,10 +37,11 @@ python plot_timing_circles.py \
     --bilby-json examples/hv_true_snr_fixed_spins_nohom_zero_noise_result.json \
     --detectors H1 V1 \
     --timing-uncertainty \
-    --contour-levels 50 90
+    --contour-levels 50 90 \
+    --timing-uncertainty --n-annulus 96 \
 ```
 
-![Bilby result](examples/timing_circle_hv_true_snr_fixed_spins_nohom_zero_noise_hlv.png)
+![Bilby result](examples/timing_circle_hv_true_snr_fixed_spins_nohom_zero_noise_hlv_annulus.png)
 
 **Direct sky position (no injection lookup):**
 
@@ -48,11 +49,10 @@ python plot_timing_circles.py \
 python plot_timing_circles.py \
     --sky-pos 97.2 -35.7 1187008882 \
     --ring-pairs L1-H1 L1-V1 H1-V1 \
-    --timing-uncertainty --timing-sigma-ms 0.5 \
     --geo
 ```
 
-![Manual plot on geo](examples/timing_circle_manual_hlv_annulus_geo.png)
+![Manual plot on geo](examples/timing_circle_manual_hlv_geo.png)
 
 ## Input formats
 
