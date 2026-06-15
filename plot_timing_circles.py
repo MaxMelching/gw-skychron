@@ -829,9 +829,25 @@ def main(argv=None):
                     idx = _arc[_fi]
                     i0 = _arc[(_fi - _step_a) % len(_arc)]
                     i1 = _arc[(_fi + _step_a) % len(_arc)]
-            dlon = (lons[i1] - lons[i0] + 180) % 360 - 180
-            dlat = lats[i1] - lats[i0]
-            angle = np.rad2deg(np.arctan2(dlat, dlon))
+
+            # Angle computation varies depending on the transform used (needed
+            # because orthographic "geo globe" projection distorts scales).
+            if use_geo:
+                _pts = ax.get_transform("world").transform(
+                    np.array([[lons[i0], lats[i0]], [lons[i1], lats[i1]]])
+                )
+                if np.all(np.isfinite(_pts)):
+                    angle = np.rad2deg(np.arctan2(
+                        _pts[1, 1] - _pts[0, 1], _pts[1, 0] - _pts[0, 0]
+                    ))
+                else:
+                    dlon = (lons[i1] - lons[i0] + 180) % 360 - 180
+                    dlat = lats[i1] - lats[i0]
+                    angle = np.rad2deg(np.arctan2(dlat, dlon))
+            else:
+                dlon = (lons[i1] - lons[i0] + 180) % 360 - 180
+                dlat = lats[i1] - lats[i0]
+                angle = np.rad2deg(np.arctan2(dlat, dlon))
 
             import matplotlib.colors as mcolors
 
