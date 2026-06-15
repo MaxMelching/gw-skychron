@@ -57,6 +57,7 @@ python ../plot_timing_circles.py \
     --injection-number 25 \
     --plot-freq 1024 \
     --ring-pairs L1-H1 L1-V1 H1-V1 \
+    --label-frac 0.34 0.8 0.8 \
     --timing-uncertainty \
     --timing-sigma-ms 0.25 \
     --n-annulus 67 \
@@ -70,6 +71,7 @@ python ../plot_timing_circles.py \
     --injection-number 25 \
     --plot-freq 1024 \
     --ring-pairs L1-H1 L1-V1 H1-V1 \
+    --label-frac 0.34 0.8 0.2 \
     --timing-uncertainty \
     --timing-sigma-ms 0.25 \
     --n-annulus 96 \
@@ -78,7 +80,7 @@ python ../plot_timing_circles.py \
     --outdir . \
     --no-show
 
-# -- Might have mainly been a two-detector injection
+# -- 25 might have mainly been a two-detector event, hence the long circle
 
 
 python ../plot_timing_circles.py \
@@ -93,5 +95,19 @@ python ../plot_timing_circles.py \
 python ../plot_timing_circles.py \
     --sky-pos 97.2 -35.7 1187008882 \
     --ring-pairs L1-H1 L1-V1 H1-V1 \
+    --label-frac 0.42 0.8 0.8 \
     --geo \
     --outdir . \
+    --no-show
+
+
+python ../plot_timing_circles.py \
+    `# --skymap-file sim_id_4.fits` \
+    --stats-file combined_stats.dat \
+    --injection-number 4 \
+    --plot-freq 56 \
+    --ring-pairs L1-H1 L1-V1 H1-V1 \
+    `# --contour-levels 50 90` \
+    --globe \
+    --outdir . \
+    --no-show

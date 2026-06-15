@@ -43,12 +43,27 @@ python plot_timing_circles.py \
 
 ![Bilby result](examples/timing_circle_hv_true_snr_fixed_spins_nohom_zero_noise_hlv_annulus.png)
 
+**Globe projection (transparent globe with back-hemisphere circles):**
+
+```bash
+python plot_timing_circles.py \
+    --stats-file examples/combined_stats.dat \
+    --injection-number 4 \
+    --plot-freq 56 \
+    --ring-pairs L1-H1 L1-V1 H1-V1 \
+    --timing-uncertainty --timing-sigma-ms 0.25 \
+    --globe
+```
+
+![Injection 4 on globe](examples/timing_circle_inj4_f56_hlv_globe.png)
+
 **Direct sky position (no injection lookup):**
 
 ```bash
 python plot_timing_circles.py \
     --sky-pos 97.2 -35.7 1187008882 \
     --ring-pairs L1-H1 L1-V1 H1-V1 \
+    --label-frac 0.42 0.8 0.8 \
     --geo
 ```
 
@@ -73,7 +88,9 @@ python plot_timing_circles.py \
 | `--n-annulus N` | 50 | Number of sampled rings per pair |
 | `--posterior-smooth-deg DEG` | 1.5 | Gaussian smoothing width for bilby KDE skymap; set to 0 to disable |
 | `--contour-levels PCT …` | `50 90` | Credible-region contour levels [%] |
-| `--geo` | off | Geo-globe projection centred on the source |
+| `--geo` | off | Orthographic geo-globe projection centred on the source |
+| `--globe` | off | Like `--geo` but with a transparent globe surface and back-hemisphere circles shown through it |
+| `--label-frac F [F …]` | auto | Override label position: fraction of circle clockwise from source (0 = source, 0.5 = opposite side). One value for all pairs or one per pair (requires `--ring-pairs`) |
 | `--outdir DIR` | script dir | Output directory for auto-named PNG |
 | `--output PATH` | — | Explicit output path (overrides auto-naming) |
 | `--no-show` | off | Skip interactive window (useful for batch runs) |
