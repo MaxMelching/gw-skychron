@@ -163,16 +163,23 @@ def build_parser():
         "e.g. --detectors H1 L1 V1 K1 produces six pairs. "
         "Mutually exclusive with --ring-pairs.",
     )
-    p.add_argument(
+    geo_group = p.add_mutually_exclusive_group()
+    geo_group.add_argument(
         "--geo",
         action="store_true",
         help="Use 'geo globe' projection instead of 'astro degrees mollweide'",
+    )
+    geo_group.add_argument(
+        "--globe",
+        action="store_true",
+        help="Like --geo but omits continents, uses an opaque globe surface, "
+        "and shows only grid lines (no coastlines).",
     )
     p.add_argument(
         "--geo-center",
         default="auto",
         metavar="'LONd LATd'",
-        help="Center for geo globe: 'auto' centres on the source longitude; "
+        help="Center for --geo / --globe: 'auto' centres on the source longitude; "
         "or pass any string accepted by SkyCoord, e.g. '-90d +23d'",
     )
     p.add_argument(
@@ -496,6 +503,7 @@ def plot_ifo(
 # ── main ──────────────────────────────────────────────────────────────────────
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    use_geo = args.geo or args.globe  # either mode uses the geo globe projection
 
     # ── resolve ring pairs ────────────────────────────────────────────────────
     if args.detectors is not None:
@@ -592,7 +600,7 @@ def main(argv=None):
     activated_ifos = set(np.array(ring_pairs).flatten())
 
     # ── plot ──────────────────────────────────────────────────────────────────
-    projection = "geo globe" if args.geo else "astro degrees mollweide"
+    projection = "geo globe" if use_geo else "astro degrees mollweide"
 
     with rc_context(
         {
@@ -604,34 +612,75 @@ def main(argv=None):
             "mathtext.fontset": "cm",
         }
     ):
-        fig = plt.figure(figsize=(9, 9) if args.geo else (14, 7))
+        fig = plt.figure(figsize=(9, 9) if use_geo else (14, 7))
 
-        if args.geo:
+        back_ax = None
+        BACK_PLT_ARGS = {}
+
+        if use_geo:
             if args.geo_center == "auto":
                 src_lon_deg = np.rad2deg((true_ra - true_gmst) % (2 * np.pi))
                 geo_center = f"{src_lon_deg:.2f}d +23d"
             else:
                 geo_center = args.geo_center
-            ax = fig.add_subplot(
-                projection=projection,
-                obstime=Time(true_obstime, format="gps"),
-                center=geo_center,
-            )
+
+            if args.globe:
+                # Antipodal center: looking from the opposite side of the globe.
+                # invert_xaxis() corrects the left-right mirror that arises from
+                # switching hemispheres, so back-side arcs align with front-side arcs
+                # at the limb (as they would on a real transparent sphere).
+                _parts = geo_center.replace('d', '').split()
+                _lon_c, _lat_c = float(_parts[0]), float(_parts[1])
+                back_center = f"{(_lon_c + 180.0) % 360.0:.2f}d {-_lat_c:+.2f}d"
+
+                _rect = [0.05, 0.02, 0.90, 0.90]
+                back_ax = fig.add_axes(
+                    _rect,
+                    projection="geo globe",
+                    obstime=Time(true_obstime, format="gps"),
+                    center=back_center,
+                )
+                back_ax.set_facecolor("none")
+                back_ax.invert_xaxis()
+                for _c in back_ax.coords:
+                    _c.set_ticklabel_visible(False)
+                    _c.set_ticks_visible(False)
+                back_ax.grid(color="gray", alpha=0.35, linewidth=0.5)
+                BACK_PLT_ARGS = dict(transform=back_ax.get_transform("world"))
+
+                ax = fig.add_axes(
+                    _rect,
+                    projection="geo globe",
+                    obstime=Time(true_obstime, format="gps"),
+                    center=geo_center,
+                )
+            else:
+                ax = fig.add_subplot(
+                    projection=projection,
+                    obstime=Time(true_obstime, format="gps"),
+                    center=geo_center,
+                )
         else:
             ax = fig.add_subplot(projection=projection)
             ax.invert_xaxis()
+            # Need inversion because Mollweide basically assumes that we look
+            # from Earth out to the sky. But what we plot is view _onto_ Earth,
+            # which flips the orientation along the vertical axis.
 
         PLT_ARGS = dict(transform=ax.get_transform("world"))
 
-        if not args.geo:
+        if not use_geo:
             ax.set_aspect("equal")
-        ax.set_facecolor(plt.get_cmap("cylon")(0.0))
+        if args.globe:
+            ax.set_facecolor("none")
+        else:
+            ax.set_facecolor(plt.get_cmap("cylon")(0.0))
         ax.grid()
 
         # continents
         if args.geo:
             ax.plot(*coastlines(), color="0.5", linewidth=0.5, **PLT_ARGS)
-        else:
+        elif not args.globe:
             plot_continents_icrs(ax, true_gmst)
 
         # skymap
@@ -694,7 +743,7 @@ def main(argv=None):
                     s_ras = s_ras % (2 * np.pi)
                     s_lons = (
                         np.rad2deg((s_ras - true_gmst) % (2 * np.pi))
-                        if args.geo
+                        if use_geo
                         else np.rad2deg(s_ras)
                     )
 
@@ -712,10 +761,20 @@ def main(argv=None):
                         zorder=9,
                         **PLT_ARGS,
                     )
+                    if back_ax is not None:
+                        back_ax.plot(
+                            s_lons_p,
+                            s_decs_p,
+                            color=color,
+                            linewidth=10,
+                            alpha=0.5 / args.n_annulus,
+                            zorder=9,
+                            **BACK_PLT_ARGS,
+                        )
 
             lons = (
                 np.rad2deg((ras - true_gmst) % (2 * np.pi))
-                if args.geo
+                if use_geo
                 else np.rad2deg(ras)
             )
             lats = np.rad2deg(decs)
@@ -724,6 +783,11 @@ def main(argv=None):
             lons_p = np.insert(lons.astype(float), jumps, np.nan)
             lats_p = np.insert(lats.astype(float), jumps, np.nan)
             ax.plot(lons_p, lats_p, linewidth=2, color=color, zorder=10, **PLT_ARGS)
+            if back_ax is not None:
+                back_ax.plot(
+                    lons_p, lats_p, linewidth=2, color=color, alpha=0.4, zorder=10,
+                    **BACK_PLT_ARGS,
+                )
 
             # inline label
             idx = int(frac * len(ras)) % len(ras)
@@ -757,7 +821,7 @@ def main(argv=None):
         # true source
         src_lon = (
             np.rad2deg((true_ra - true_gmst) % (2 * np.pi))
-            if args.geo
+            if use_geo
             else np.rad2deg(true_ra)
         )
         ax.plot(
@@ -775,7 +839,7 @@ def main(argv=None):
         LABEL_ARGS = dict(ha="right", va="bottom", fontsize=12, **PLT_ARGS)
         for name in activated_ifos:
             geo_lon, geo_lat = DETECTOR_POSITION[name]
-            if args.geo:
+            if use_geo:
                 plot_lon, plot_lat = geo_lon, geo_lat
             else:
                 plot_lon = np.rad2deg((np.deg2rad(geo_lon) + true_gmst) % (2 * np.pi))
@@ -825,7 +889,7 @@ def main(argv=None):
                     out_dir,
                     f"timing_circle_{inj_tag}{freq_tag}_{det_label}"
                     + ("_annulus" if args.timing_uncertainty else "")
-                    + ("_geo" if args.geo else "")
+                    + ("_geo" if args.geo else "_globe" if args.globe else "")
                     + ".png",
                 )
             plt.savefig(out_path, dpi=args.dpi, bbox_inches="tight")
