@@ -616,6 +616,7 @@ def main(argv=None):
 
         back_ax = None
         BACK_PLT_ARGS = {}
+        _globe_n_view = None  # unit vector toward viewer, set only in --globe mode
 
         if use_geo:
             if args.geo_center == "auto":
@@ -624,13 +625,21 @@ def main(argv=None):
             else:
                 geo_center = args.geo_center
 
+            # Unit vector toward the viewer — used to restrict labels to the
+            # front hemisphere in both --geo and --globe modes.
+            _parts = geo_center.replace('d', '').split()
+            _lon_c, _lat_c = float(_parts[0]), float(_parts[1])
+            _globe_n_view = np.array([
+                np.cos(np.deg2rad(_lat_c)) * np.cos(np.deg2rad(_lon_c)),
+                np.cos(np.deg2rad(_lat_c)) * np.sin(np.deg2rad(_lon_c)),
+                np.sin(np.deg2rad(_lat_c)),
+            ])
+
             if args.globe:
                 # Antipodal center: looking from the opposite side of the globe.
                 # invert_xaxis() corrects the left-right mirror that arises from
                 # switching hemispheres, so back-side arcs align with front-side arcs
                 # at the limb (as they would on a real transparent sphere).
-                _parts = geo_center.replace('d', '').split()
-                _lon_c, _lat_c = float(_parts[0]), float(_parts[1])
                 back_center = f"{(_lon_c + 180.0) % 360.0:.2f}d {-_lat_c:+.2f}d"
 
                 _rect = [0.05, 0.02, 0.90, 0.90]
@@ -789,10 +798,37 @@ def main(argv=None):
                     **BACK_PLT_ARGS,
                 )
 
-            # inline label
+            # inline label — in geo/globe mode restrict to front-hemisphere points
             idx = int(frac * len(ras)) % len(ras)
             step = max(3, len(ras) // 60)
-            i0, i1 = (idx - step) % len(ras), (idx + step) % len(ras)
+            i0 = (idx - step) % len(ras)
+            i1 = (idx + step) % len(ras)
+            if _globe_n_view is not None:
+                _lr = np.deg2rad(lons)
+                _br = np.deg2rad(lats)
+                _dot = (np.cos(_br) * np.cos(_lr) * _globe_n_view[0]
+                        + np.cos(_br) * np.sin(_lr) * _globe_n_view[1]
+                        + np.sin(_br) * _globe_n_view[2])
+                _front = np.where(_dot > 0)[0]
+                if _front.size > 0:
+                    # Build the ordered front arc. When the arc wraps around the
+                    # ring-array boundary (two disjoint index ranges), a single gap
+                    # appears in _front; we rejoin the pieces in ring order so that
+                    # i0/i1 neighbours are always adjacent on the great circle.
+                    _diffs = np.diff(_front)
+                    _gaps = np.where(_diffs > 1)[0]
+                    if len(_gaps) == 0:
+                        _arc = _front
+                    elif len(_gaps) == 1:
+                        _arc = np.concatenate([_front[_gaps[0]+1:], _front[:_gaps[0]+1]])
+                    else:
+                        _segs = np.split(_front, _gaps + 1)
+                        _arc = max(_segs, key=len)
+                    _step_a = max(1, len(_arc) // 60)
+                    _fi = int(frac * len(_arc)) % len(_arc)
+                    idx = _arc[_fi]
+                    i0 = _arc[(_fi - _step_a) % len(_arc)]
+                    i1 = _arc[(_fi + _step_a) % len(_arc)]
             dlon = (lons[i1] - lons[i0] + 180) % 360 - 180
             dlat = lats[i1] - lats[i0]
             angle = np.rad2deg(np.arctan2(dlat, dlon))
