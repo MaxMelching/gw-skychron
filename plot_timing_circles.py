@@ -62,6 +62,18 @@ Bilby result with custom smoothing and explicit timing sigma:
         --timing-uncertainty --timing-sigma-ms 0.5 \\
         --posterior-smooth-deg 2.0 \\
         --contour-levels 50 90
+
+Override label positions when labels overlap (single value for all pairs, or
+one value per pair — the fraction is measured clockwise from the true source):
+    python plot_timing_circles.py -n 4 \\
+        --stats-file /path/to/stats/combined_stats.dat \\
+        --ring-pairs L1-H1 L1-V1 H1-V1 \\
+        --label-frac 0.25
+
+    python plot_timing_circles.py -n 4 \\
+        --stats-file /path/to/stats/combined_stats.dat \\
+        --ring-pairs L1-H1 L1-V1 H1-V1 \\
+        --label-frac 0.15 0.30 0.45
 """
 
 import argparse
@@ -181,6 +193,19 @@ def build_parser():
         metavar="'LONd LATd'",
         help="Center for --geo / --globe: 'auto' centres on the source longitude; "
         "or pass any string accepted by SkyCoord, e.g. '-90d +23d'",
+    )
+    p.add_argument(
+        "--label-frac",
+        nargs="+",
+        type=float,
+        default=None,
+        metavar="F",
+        help="Override automatic label placement: fraction of the full circle "
+        "traversed clockwise from the true source (0 = at source, "
+        "0.5 = halfway around, 1 = back at source). "
+        "One value applies to all pairs; one value per pair is also accepted "
+        "(requires --ring-pairs so the per-pair mapping is unambiguous). "
+        "Default: label placed at the highest visible point on the ring.",
     )
     p.add_argument(
         "--timing-uncertainty",
@@ -502,7 +527,8 @@ def plot_ifo(
 
 # ── main ──────────────────────────────────────────────────────────────────────
 def main(argv=None):
-    args = build_parser().parse_args(argv)
+    _p = build_parser()
+    args = _p.parse_args(argv)
     use_geo = args.geo or args.globe  # either mode uses the geo globe projection
 
     # ── resolve ring pairs ────────────────────────────────────────────────────
@@ -532,6 +558,27 @@ def main(argv=None):
             ring_pairs.append((d1, d2))
 
     n_det = len({det for pair in ring_pairs for det in pair})
+
+    # ── resolve per-pair label fractions ─────────────────────────────────────
+    if args.label_frac is not None:
+        if len(args.label_frac) > 1:
+            if args.ring_pairs is None:
+                _p.error(
+                    "--label-frac with multiple values requires explicit "
+                    "--ring-pairs so the per-pair mapping is unambiguous"
+                )
+            if len(args.label_frac) != len(ring_pairs):
+                _p.error(
+                    f"--label-frac has {len(args.label_frac)} values "
+                    f"but {len(ring_pairs)} ring pairs were specified"
+                )
+        label_fracs = (
+            args.label_frac * len(ring_pairs)
+            if len(args.label_frac) == 1
+            else list(args.label_frac)
+        )
+    else:
+        label_fracs = [None] * len(ring_pairs)
 
     # ── load injection parameters ─────────────────────────────────────────────
     row = None
@@ -715,10 +762,9 @@ def main(argv=None):
 
         # timing circles
         _ring_colors = plt.get_cmap("viridis")(np.linspace(0, 1, len(ring_pairs)))
-        _label_fracs = (4 * [0.85, 0.50, 0.75])[: len(ring_pairs)]
         np.random.seed(args.seed)
 
-        for (d1, d2), color, frac in zip(ring_pairs, _ring_colors, _label_fracs):
+        for (d1, d2), color, _lf in zip(ring_pairs, _ring_colors, label_fracs):
             ras, decs, _, _ = rings[(d1, d2)]
             label = f"{d1}-{d2}"
 
@@ -798,23 +844,38 @@ def main(argv=None):
                     **BACK_PLT_ARGS,
                 )
 
-            # inline label — in geo/globe mode restrict to front-hemisphere points
-            idx = int(frac * len(ras)) % len(ras)
+            # inline label
             step = max(3, len(ras) // 60)
-            i0 = (idx - step) % len(ras)
-            i1 = (idx + step) % len(ras)
-            if _globe_n_view is not None:
-                _lr = np.deg2rad(lons)
-                _br = np.deg2rad(lats)
+            _n = len(ras)
+            _lr = np.deg2rad(lons)
+            _br = np.deg2rad(lats)
+
+            if _lf is not None:
+                # User-specified: place at fraction _lf of the full circle,
+                # measured clockwise from the true source as seen on screen.
+                # CW on screen (y-down physically) = negative signed area in
+                # matplotlib display coords (y-up).
+                _all_screen = ax.get_transform("world").transform(
+                    np.column_stack([lons, lats])
+                )
+                _ok = np.all(np.isfinite(_all_screen), axis=1)
+                _sx, _sy = _all_screen[_ok, 0], _all_screen[_ok, 1]
+                _sa = 0.5 * float(np.sum(_sx[:-1] * _sy[1:] - _sx[1:] * _sy[:-1]))
+                _cw = 1 if _sa < 0 else -1   # +1 if +index direction is CW
+                _tl = (true_ra - true_gmst) % (2 * np.pi) if use_geo else true_ra
+                _cos_sep = (np.sin(_br) * np.sin(true_dec)
+                            + np.cos(_br) * np.cos(true_dec) * np.cos(_lr - _tl))
+                _idx_src = int(np.argmax(_cos_sep))
+                idx = int((_idx_src + _cw * int(_lf * _n)) % _n)
+                i0 = (idx - step) % _n
+                i1 = (idx + step) % _n
+            elif _globe_n_view is not None:
+                # geo/globe default: highest visible point on the front arc.
                 _dot = (np.cos(_br) * np.cos(_lr) * _globe_n_view[0]
                         + np.cos(_br) * np.sin(_lr) * _globe_n_view[1]
                         + np.sin(_br) * _globe_n_view[2])
                 _front = np.where(_dot > 0)[0]
                 if _front.size > 0:
-                    # Build the ordered front arc. When the arc wraps around the
-                    # ring-array boundary (two disjoint index ranges), a single gap
-                    # appears in _front; we rejoin the pieces in ring order so that
-                    # i0/i1 neighbours are always adjacent on the great circle.
                     _diffs = np.diff(_front)
                     _gaps = np.where(_diffs > 1)[0]
                     if len(_gaps) == 0:
@@ -824,26 +885,50 @@ def main(argv=None):
                     else:
                         _segs = np.split(_front, _gaps + 1)
                         _arc = max(_segs, key=len)
-                    _step_a = max(1, len(_arc) // 60)
-                    _fi = int(frac * len(_arc)) % len(_arc)
-                    idx = _arc[_fi]
-                    i0 = _arc[(_fi - _step_a) % len(_arc)]
-                    i1 = _arc[(_fi + _step_a) % len(_arc)]
-
-            # Angle computation varies depending on the transform used (needed
-            # because orthographic "geo globe" projection distorts scales).
-            if use_geo:
-                _pts = ax.get_transform("world").transform(
-                    np.array([[lons[i0], lats[i0]], [lons[i1], lats[i1]]])
-                )
-                if np.all(np.isfinite(_pts)):
-                    angle = np.rad2deg(np.arctan2(
-                        _pts[1, 1] - _pts[0, 1], _pts[1, 0] - _pts[0, 0]
-                    ))
+                    _screen = ax.get_transform("world").transform(
+                        np.column_stack([lons[_arc], lats[_arc]])
+                    )
+                    _fi = int(np.argmax(_screen[:, 1]))
+                    idx = int(_arc[_fi])
+                    _na = len(_arc)
+                    _step_a = max(1, _na // 60)
+                    i0 = int(_arc[(_fi - _step_a) % _na])
+                    i1 = int(_arc[(_fi + _step_a) % _na])
                 else:
-                    dlon = (lons[i1] - lons[i0] + 180) % 360 - 180
-                    dlat = lats[i1] - lats[i0]
-                    angle = np.rad2deg(np.arctan2(dlat, dlon))
+                    idx = 0
+                    i0 = (idx - step) % _n
+                    i1 = (idx + step) % _n
+            else:
+                # Mollweide default: highest visible point in source's segment
+                # (or the full ring when there are no longitude-wrap jumps).
+                if len(jumps) == 0:
+                    _visible = np.arange(_n)
+                else:
+                    _tl = true_ra
+                    _cos_sep = (np.sin(_br) * np.sin(true_dec)
+                                + np.cos(_br) * np.cos(true_dec) * np.cos(_lr - _tl))
+                    _idx_src = int(np.argmax(_cos_sep))
+                    _bounds = np.concatenate([[0], jumps, [_n]])
+                    _si = int(np.searchsorted(_bounds, _idx_src, side='right')) - 1
+                    _visible = np.arange(int(_bounds[_si]), int(_bounds[_si + 1]))
+                _screen = ax.get_transform("world").transform(
+                    np.column_stack([lons[_visible], lats[_visible]])
+                )
+                _vi = int(np.argmax(_screen[:, 1]))
+                idx = int(_visible[_vi])
+                i0 = (idx - step) % _n
+                i1 = (idx + step) % _n
+
+            # Always compute the angle in display space so the rotation matches the
+            # rendered ring tangent, regardless of projection distortions or axis
+            # inversions (Mollweide inverts x, which flips geographic-space dlon).
+            _pts = ax.get_transform("world").transform(
+                np.array([[lons[i0], lats[i0]], [lons[i1], lats[i1]]])
+            )
+            if np.all(np.isfinite(_pts)):
+                angle = np.rad2deg(np.arctan2(
+                    _pts[1, 1] - _pts[0, 1], _pts[1, 0] - _pts[0, 0]
+                ))
             else:
                 dlon = (lons[i1] - lons[i0] + 180) % 360 - 180
                 dlat = lats[i1] - lats[i0]
