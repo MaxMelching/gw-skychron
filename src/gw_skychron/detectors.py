@@ -40,24 +40,52 @@ TIMING_BANDWIDTH_HZ = {
 
 
 def compute_antenna_response(det1, det2, ras, decs, t_event):
-    """Return (F1, F2) arrays — sqrt(F+²+Fx²) at each (ra, dec) [radians]."""
-    F1, F2 = [], []
-    for r, d in zip(ras, decs):
+    """Return (F1, F2) arrays — sqrt(F+²+Fx²) at each (ra, dec) [radians].
 
-        def _antenna(det, r=r, d=d):
-            ep = detectors[det].get_polarization_tensor(r, d, t_event, 0, "plus")
-            ec = detectors[det].get_polarization_tensor(r, d, t_event, 0, "cross")
-            Fp = np.einsum("ij,ij", detectors[det].detector_tensor, ep)
-            Fc = np.einsum("ij,ij", detectors[det].detector_tensor, ec)
-            return np.sqrt(Fp ** 2 + Fc ** 2)
+    Fully vectorized over N sky positions (no Python loop).  Assumes psi=0,
+    which is the only value ever used here.
 
-        F1.append(_antenna(det1))
-        F2.append(_antenna(det2))
-    return np.array(F1), np.array(F2)
+    Wave-frame vectors for psi=0 (arXiv:gr-qc/0008066, appendix B):
+        X = [ sin φ,  -cos φ,   0       ]
+        Y = [-cos φ sin δ, -sin φ sin δ, cos δ]
+    where φ = ra - gmst, δ = dec.
+
+    Antenna patterns:
+        F+ = D:( XX - YY )   →   (XD*X - YD*Y).sum(axis=1)
+        F× = D:( XY + YX )   →   2*(XD*Y).sum(axis=1)   (D symmetric)
+    """
+    gmst = lal.GreenwichMeanSiderealTime(t_event) % (2 * np.pi)
+    phi = np.asarray(ras) - gmst        # shape (N,)
+    dec = np.asarray(decs)              # shape (N,)
+
+    # Wave-frame basis vectors, shape (N, 3)
+    X = np.column_stack([np.sin(phi), -np.cos(phi), np.zeros(len(phi))])
+    Y = np.column_stack([-np.cos(phi) * np.sin(dec),
+                         -np.sin(phi) * np.sin(dec),
+                          np.cos(dec)])
+
+    def _F(det):
+        D = detectors[det].detector_tensor          # (3, 3)
+        XD = X @ D                                  # (N, 3)
+        YD = Y @ D                                  # (N, 3)
+        Fp = (XD * X).sum(axis=1) - (YD * Y).sum(axis=1)
+        Fc = 2.0 * (XD * Y).sum(axis=1)
+        return np.sqrt(Fp ** 2 + Fc ** 2)
+
+    return _F(det1), _F(det2)
 
 
-def get_ring_w_coloring(det1, det2, ra, dec, t_event):
-    """Return (ras, decs, F1, F2) for the timing circle of a detector pair."""
+def get_ring_w_coloring(det1, det2, ra, dec, t_event, resp_func=False):
+    """Return (ras, decs, F1, F2) for the timing circle of a detector pair.
+
+    When resp_func=False (default), F1 and F2 are None and the antenna
+    response calculation is skipped entirely.
+
+    When resp_func=True, antenna response is evaluated at psi=0 (GW
+    polarization angle).  We do not average over psi because the ring shape
+    is polarization-independent and the coloring is intended as a qualitative
+    orientation guide, not a detection statistic.
+    """
     time_delay = detectors[det1].time_delay(
         detectors[det2].vertex, ra=ra, dec=dec, t_event=t_event
     )
@@ -65,7 +93,10 @@ def get_ring_w_coloring(det1, det2, ra, dec, t_event):
         detectors[det2].vertex, time_delay=time_delay, t_event=t_event
     )
     possible_ras = possible_ras % (2 * np.pi)
-    F1, F2 = compute_antenna_response(det1, det2, possible_ras, possible_decs, t_event)
+    if resp_func:
+        F1, F2 = compute_antenna_response(det1, det2, possible_ras, possible_decs, t_event)
+    else:
+        F1 = F2 = None
     return possible_ras, possible_decs, F1, F2
 
 

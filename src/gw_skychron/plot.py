@@ -574,7 +574,9 @@ def main(argv=None):
 
     # -- Precompute timing circles
     rings = {
-        (d1, d2): get_ring_w_coloring(d1, d2, true_ra, true_dec, true_obstime)
+        (d1, d2): get_ring_w_coloring(
+            d1, d2, true_ra, true_dec, true_obstime, resp_func=args.resp_func
+        )
         for d1, d2 in ring_pairs
     }
     activated_ifos = set(np.array(ring_pairs).flatten())
