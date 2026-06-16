@@ -24,7 +24,7 @@ dependencies = [
 "Source Code" = "https://github.com/maxmelching/gw-skychron"
 
 [project.scripts]
-gw-skychron = "gw_skychron.plot_timing_circles:main"
+gw-skychron = "gw_skychron.plot:main"
 
 [project.optional-dependencies]
 bilby = ["bilby"]
