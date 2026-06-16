@@ -39,18 +39,10 @@ TIMING_BANDWIDTH_HZ = {
 }
 
 
-def get_ring_w_coloring(det1, det2, ra, dec, t_event):
-    """Return (ras, decs, F1, F2) for the timing circle of a detector pair."""
-    time_delay = detectors[det1].time_delay(
-        detectors[det2].vertex, ra=ra, dec=dec, t_event=t_event
-    )
-    possible_ras, possible_decs = detectors[det1].sky_location(
-        detectors[det2].vertex, time_delay=time_delay, t_event=t_event
-    )
-    possible_ras = possible_ras % (2 * np.pi)
-
+def compute_antenna_response(det1, det2, ras, decs, t_event):
+    """Return (F1, F2) arrays — sqrt(F+²+Fx²) at each (ra, dec) [radians]."""
     F1, F2 = [], []
-    for r, d in zip(possible_ras, possible_decs):
+    for r, d in zip(ras, decs):
 
         def _antenna(det, r=r, d=d):
             ep = detectors[det].get_polarization_tensor(r, d, t_event, 0, "plus")
@@ -61,7 +53,20 @@ def get_ring_w_coloring(det1, det2, ra, dec, t_event):
 
         F1.append(_antenna(det1))
         F2.append(_antenna(det2))
-    return possible_ras, possible_decs, np.array(F1), np.array(F2)
+    return np.array(F1), np.array(F2)
+
+
+def get_ring_w_coloring(det1, det2, ra, dec, t_event):
+    """Return (ras, decs, F1, F2) for the timing circle of a detector pair."""
+    time_delay = detectors[det1].time_delay(
+        detectors[det2].vertex, ra=ra, dec=dec, t_event=t_event
+    )
+    possible_ras, possible_decs = detectors[det1].sky_location(
+        detectors[det2].vertex, time_delay=time_delay, t_event=t_event
+    )
+    possible_ras = possible_ras % (2 * np.pi)
+    F1, F2 = compute_antenna_response(det1, det2, possible_ras, possible_decs, t_event)
+    return possible_ras, possible_decs, F1, F2
 
 
 def _network_snr(row):

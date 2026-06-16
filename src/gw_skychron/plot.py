@@ -85,6 +85,7 @@ from .detectors import (
     detectors,
     DETECTOR_POSITION,
     DETECTOR_ARM_AZ,
+    compute_antenna_response,
     get_ring_w_coloring,
     compute_pair_sigma_ms,
 )
@@ -670,19 +671,56 @@ def main(argv=None):
                     )
                     s_decs_deg = np.rad2deg(s_decs)
                     jumps_s = np.where(np.abs(np.diff(s_lons)) > 180)[0] + 1
-                    s_lons_p = np.insert(s_lons.astype(float), jumps_s, np.nan)
-                    s_decs_p = np.insert(s_decs_deg.astype(float), jumps_s, np.nan)
-                    ax.plot(
-                        s_lons_p, s_decs_p,
-                        color=color, linewidth=10,
-                        alpha=1 / args.n_annulus, zorder=9, **PLT_ARGS,
-                    )
-                    if back_ax is not None:
-                        back_ax.plot(
+
+                    if args.resp_func:
+                        F1_s, F2_s = compute_antenna_response(
+                            d1, d2, s_ras, s_decs, true_obstime
+                        )
+                        resp_s = np.sqrt(F1_s ** 2 + F2_s ** 2)
+                        _jump_set_s = set(jumps_s.tolist())
+                        _segs_s, _svals_s = [], []
+                        for _i in range(len(s_lons) - 1):
+                            if (_i + 1) in _jump_set_s:
+                                continue
+                            _segs_s.append([
+                                (s_lons[_i], s_decs_deg[_i]),
+                                (s_lons[_i + 1], s_decs_deg[_i + 1]),
+                            ])
+                            _svals_s.append((resp_s[_i] + resp_s[_i + 1]) / 2)
+                        _svals_s = np.asarray(_svals_s)
+                        _lc_s = LineCollection(
+                            _segs_s, linewidth=10,
+                            alpha=1 / args.n_annulus, zorder=9,
+                            transform=ax.get_transform("world"),
+                        )
+                        _lc_s.set_array(_svals_s)
+                        _lc_s.set_cmap(_resp_cmap)
+                        _lc_s.set_norm(_resp_norm)
+                        ax.add_collection(_lc_s)
+                        if back_ax is not None:
+                            _lc_s_back = LineCollection(
+                                _segs_s, linewidth=10,
+                                alpha=0.5 / args.n_annulus, zorder=9,
+                                transform=back_ax.get_transform("world"),
+                            )
+                            _lc_s_back.set_array(_svals_s)
+                            _lc_s_back.set_cmap(_resp_cmap)
+                            _lc_s_back.set_norm(_resp_norm)
+                            back_ax.add_collection(_lc_s_back)
+                    else:
+                        s_lons_p = np.insert(s_lons.astype(float), jumps_s, np.nan)
+                        s_decs_p = np.insert(s_decs_deg.astype(float), jumps_s, np.nan)
+                        ax.plot(
                             s_lons_p, s_decs_p,
                             color=color, linewidth=10,
-                            alpha=0.5 / args.n_annulus, zorder=9, **BACK_PLT_ARGS,
+                            alpha=1 / args.n_annulus, zorder=9, **PLT_ARGS,
                         )
+                        if back_ax is not None:
+                            back_ax.plot(
+                                s_lons_p, s_decs_p,
+                                color=color, linewidth=10,
+                                alpha=0.5 / args.n_annulus, zorder=9, **BACK_PLT_ARGS,
+                            )
 
             # -- Main circle --------------------------------------------------
             lons = (
@@ -753,7 +791,8 @@ def main(argv=None):
             darker = (
                 tuple(c * 0.5 for c in mcolors.to_rgba(color)[:3]) + (1.0,)
                 if not args.resp_func
-                else _resp_cmap(0.0)
+                # else _resp_cmap(0.0)
+                else "black"
             )
             ax.text(
                 lons[idx], lats[idx], f" {label} ",
@@ -839,6 +878,7 @@ def main(argv=None):
                     out_dir,
                     f"timing_circle_{inj_tag}{freq_tag}_{det_label}"
                     + ("_annulus" if args.timing_uncertainty else "")
+                    + ("_resp" if args.resp_func else "")
                     + ("_geo" if args.geo else "_globe" if args.globe else "")
                     + ".png",
                 )

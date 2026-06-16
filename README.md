@@ -47,7 +47,7 @@ gw-skychron \
     --timing-uncertainty --n-annulus 96
 ```
 
-![Bilby result](examples/timing_circle_hv_true_snr_fixed_spins_nohom_zero_noise_hv_annulus.png)
+![Bilby result](examples/timing_circle_hv_true_snr_fixed_spins_nohom_zero_noise_hv_resp.png)
 
 **Globe projection (transparent globe with back-hemisphere circles):**
 
@@ -62,7 +62,7 @@ gw-skychron \
     --globe
 ```
 
-![Injection 4 on globe](examples/timing_circle_inj4_f56_hlv_globe.png)
+![Injection 4 on globe](examples/timing_circle_inj4_f56_hlv_annulus_resp_globe.png)
 
 **Direct sky position (no injection lookup):**
 

@@ -33,6 +33,7 @@ gw-skychron \
     --plot-freq 56 \
     --ring-pairs L1-H1 L1-V1 H1-V1 \
     --resp-func \
+    --timing-uncertainty --timing-sigma-ms 0.25 \
     --globe \
     --outdir . \
     --no-show
@@ -103,7 +104,7 @@ gw-skychron \
     --bilby-json hv_true_snr_fixed_spins_nohom_zero_noise_result.json \
     --ring-pairs H1-V1 \
     --contour-levels 50 90 \
-    --timing-uncertainty --n-annulus 96 \
+    --resp-func \
     --outdir . \
     --no-show
 
