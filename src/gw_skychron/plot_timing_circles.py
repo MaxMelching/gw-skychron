@@ -3,74 +3,59 @@
 """
 Plot timing circles and sky-localization credible regions for one injection.
 
-Basic usage (injection number with explicit files):
-    python plot_timing_circles.py -n 4 \\
+Injection from a stats file with explicit timing sigma:
+    gw-skychron \\
         --stats-file /path/to/stats/combined_stats.dat \\
-        --skymap-file /path/to/56/fits/sim_id_4.fits
+        --skymap-file /path/to/56/fits/sim_id_4.fits \\
+        --injection-number 4 \\
+        --ring-pairs L1-H1 L1-V1 H1-V1 \\
+        --timing-uncertainty --timing-sigma-ms 0.42 \\
+        --contour-levels 50 90
 
-All detectors from a network, with auto-computed timing annuli:
-    python plot_timing_circles.py -n 4 \\
+All detectors, auto-computed timing annuli:
+    gw-skychron -n 4 \\
         --stats-file /path/to/stats/combined_stats.dat \\
         --skymap-file /path/to/56/fits/sim_id_4.fits \\
         --detectors H1 L1 V1 \\
-        --timing-uncertainty \\
-        --n-annulus 80
+        --timing-uncertainty --n-annulus 80
 
-Override timing uncertainty with an explicit sigma:
-    python plot_timing_circles.py -n 4 \\
-        --stats-file /path/to/stats/combined_stats.dat \\
-        --skymap-file /path/to/56/fits/sim_id_4.fits \\
-        --ring-pairs L1-H1 L1-V1 H1-V1 \\
-        --timing-uncertainty --timing-sigma-ms 0.42 \\
-        --n-annulus 50
-
-Provide sky position directly (no injection lookup):
-    python plot_timing_circles.py \\
-        --sky-pos 45.0 -30.0 1234567890 \\
-        --ring-pairs L1-H1 L1-V1 \\
-        --timing-uncertainty --timing-sigma-ms 0.5
-
-Sky position with a skymap overlay:
-    python plot_timing_circles.py \\
+Sky position provided directly, with an optional skymap overlay:
+    gw-skychron \\
         --sky-pos 45.0 -30.0 1234567890 \\
         --skymap-file /path/to/skymap.fits \\
         --ring-pairs L1-H1 L1-V1 \\
         --timing-uncertainty --timing-sigma-ms 0.5
 
-Full example with geo projection and custom output directory:
-    python plot_timing_circles.py \\
+Geo projection with custom output directory:
+    gw-skychron \\
         --stats-file /path/to/stats/combined_stats.dat \\
-        --skymap-file /path/to/56/fits/sim_id_4.fits \\
-        --injection-number 4 \\
-        --plot-freq 56 \\
+        --injection-number 4 --plot-freq 56 \\
         --ring-pairs L1-H1 L1-V1 H1-V1 \\
-        --timing-uncertainty \\
-        --contour-levels 50 90 \\
-        --geo \\
-        --outdir /tmp/plots
+        --timing-uncertainty --contour-levels 50 90 \\
+        --geo --outdir /tmp/plots
 
-Bilby result (posterior KDE skymap, auto-computed timing uncertainty):
-    python plot_timing_circles.py \\
-        --bilby-json /path/to/result.json \\
-        --detectors H1 V1 \\
-        --timing-uncertainty
-
-Bilby result with custom smoothing and explicit timing sigma:
-    python plot_timing_circles.py \\
+Bilby result with custom smoothing:
+    gw-skychron \\
         --bilby-json /path/to/result.json \\
         --detectors H1 V1 \\
         --timing-uncertainty --timing-sigma-ms 0.5 \\
-        --posterior-smooth-deg 2.0 \\
-        --contour-levels 50 90
+        --posterior-smooth-deg 2.0 --contour-levels 50 90
 
-Override label positions when labels overlap (single value for all pairs, or
-one value per pair — the fraction is measured clockwise from the true source):
-    python plot_timing_circles.py -n 4 \\
+Color circles by antenna response (globe projection):
+    gw-skychron \\
+        --stats-file /path/to/stats/combined_stats.dat \\
+        --injection-number 4 --plot-freq 56 \\
+        --ring-pairs L1-H1 L1-V1 H1-V1 \\
+        --resp-func --globe
+
+Override label positions (single value for all pairs, or one per pair —
+the fraction is measured clockwise from the true source):
+    gw-skychron -n 4 \\
         --stats-file /path/to/stats/combined_stats.dat \\
         --ring-pairs L1-H1 L1-V1 H1-V1 \\
         --label-frac 0.25
 
-    python plot_timing_circles.py -n 4 \\
+    gw-skychron -n 4 \\
         --stats-file /path/to/stats/combined_stats.dat \\
         --ring-pairs L1-H1 L1-V1 H1-V1 \\
         --label-frac 0.15 0.30 0.45

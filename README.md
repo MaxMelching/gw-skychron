@@ -97,6 +97,7 @@ gw-skychron \
 | `--contour-levels PCT …` | `50 90` | Credible-region contour levels [%] |
 | `--geo` | off | Orthographic geo-globe projection centred on the source |
 | `--globe` | off | Like `--geo` but with a transparent globe surface and back-hemisphere circles shown through it |
+| `--resp-func` | off | Color each timing circle by the combined antenna response √(F₁²+F₂²) along the arc, using a single normalized colorbar across all pairs |
 | `--label-frac F [F …]` | auto | Override label position: fraction of circle clockwise from source (0 = source, 0.5 = opposite side). One value for all pairs or one per pair (requires `--ring-pairs`) |
 | `--outdir DIR` | script dir | Output directory for auto-named PNG |
 | `--output PATH` | — | Explicit output path (overrides auto-naming) |
