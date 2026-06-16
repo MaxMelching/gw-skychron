@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gw-skychron"
+dynamic = ["version"]
+authors = [
+    { name = "Max Melching", email = "mmelchin@caltech.edu" },
+    { name = "Eliot Finch", email = "efinch@caltech.edu" },
+]
+requires-python = ">=3.11"
+dependencies = [
+    "astropy",
+    "healpy",
+    "lalsuite",
+    "ligo.skymap",
+    "matplotlib",
+    "numpy",
+    "pandas",
+]
+
+[project.urls]
+"Source Code" = "https://github.com/maxmelching/gw-skychron"
+
+[project.scripts]
+gw-skychron = "gw_skychron.plot_timing_circles:main"
+
+[project.optional-dependencies]
+bilby = ["bilby"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools_scm]
+version_file = "src/gw_skychron/_version.py"
+version_scheme = "no-guess-dev"
+local_scheme = "dirty-tag"
+fallback_version = "0.0.0"

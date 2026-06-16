@@ -4,22 +4,29 @@ Visualize gravitational-wave sky localization by overlaying timing circles on a 
 
 ## Dependencies
 
-All required packages are available in the [IGWN conda distribution](https://computing.docs.ligo.org/conda/):
+All required packages are available in the [IGWN conda distribution](https://computing.docs.ligo.org/conda/). Alternatively, create a custom virtual environment by running
 
 ```bash
-conda create -n igwn-py311 python=3.11
-conda activate igwn-py311
-conda install -c conda-forge lalsuite ligo.skymap bilby healpy
+conda create -n gw-skychron python=3.11
+conda activate gw-skychron
 ```
 
-Core runtime dependencies: `lal`, `ligo.skymap`, `healpy`, `numpy`, `scipy`, `pandas`, `matplotlib`, `astropy`. `bilby` is only required when using `--bilby-json`.
+or the analogous command with your favorite tool. After that, go into this repository and run
+
+```bash
+pip install .
+```
+
+(adding the optional `-e` flag installs an editable version). This should automatically install all the core runtime dependencies: `lal`, `ligo.skymap`, `healpy`, `numpy`, `pandas`, `matplotlib`, `astropy`. `bilby` is only required when using `--bilby-json`.
+
+After that, you can use the provided CLI by simply running `gw-skychron ...`. See below for concrete examples.
 
 ## Quick start
 
 **Injection from a stats file + FITS skymap:**
 
 ```bash
-python plot_timing_circles.py \
+gw-skychron \
     --skymap-file examples/sim_id_4.fits \
     --stats-file examples/combined_stats.dat \
     --injection-number 4 \
@@ -33,20 +40,19 @@ python plot_timing_circles.py \
 **Bilby posterior (KDE skymap, auto-computed timing uncertainty):**
 
 ```bash
-python plot_timing_circles.py \
+gw-skychron \
     --bilby-json examples/hv_true_snr_fixed_spins_nohom_zero_noise_result.json \
     --detectors H1 V1 \
-    --timing-uncertainty \
     --contour-levels 50 90 \
-    --timing-uncertainty --n-annulus 96 \
+    --timing-uncertainty --n-annulus 96
 ```
 
-![Bilby result](examples/timing_circle_hv_true_snr_fixed_spins_nohom_zero_noise_hlv_annulus.png)
+![Bilby result](examples/timing_circle_hv_true_snr_fixed_spins_nohom_zero_noise_hv_annulus.png)
 
 **Globe projection (transparent globe with back-hemisphere circles):**
 
 ```bash
-python plot_timing_circles.py \
+gw-skychron \
     --stats-file examples/combined_stats.dat \
     --injection-number 4 \
     --plot-freq 56 \
@@ -60,7 +66,7 @@ python plot_timing_circles.py \
 **Direct sky position (no injection lookup):**
 
 ```bash
-python plot_timing_circles.py \
+gw-skychron \
     --sky-pos 97.2 -35.7 1187008882 \
     --ring-pairs L1-H1 L1-V1 H1-V1 \
     --label-frac 0.42 0.8 0.8 \
@@ -95,4 +101,4 @@ python plot_timing_circles.py \
 | `--output PATH` | — | Explicit output path (overrides auto-naming) |
 | `--no-show` | off | Skip interactive window (useful for batch runs) |
 
-Run `python plot_timing_circles.py --help` for the full reference.
+Run `gw-skychron --help` for the full reference.

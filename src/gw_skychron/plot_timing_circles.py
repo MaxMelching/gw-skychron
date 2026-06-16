@@ -80,7 +80,6 @@ import argparse
 import ast
 import itertools
 import os
-import sys
 
 import healpy as hp
 import lal
@@ -101,8 +100,7 @@ from ligo.skymap import postprocess as lsm_postprocess
 from ligo.skymap.plot import outline_text
 from ligo.skymap.plot.backdrop import coastlines
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from interferometer import interferometer
+from .interferometer import interferometer
 
 
 # ── argument parsing ──────────────────────────────────────────────────────────

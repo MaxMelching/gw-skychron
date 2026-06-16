@@ -3,7 +3,7 @@
 cd "$(dirname "$0")"
 
 
-python ../plot_timing_circles.py \
+gw-skychron \
     --skymap-file sim_id_4.fits \
     --stats-file combined_stats.dat \
     --injection-number 4 \
@@ -13,7 +13,7 @@ python ../plot_timing_circles.py \
     --outdir . \
     --no-show
 
-python ../plot_timing_circles.py \
+gw-skychron \
     --skymap-file sim_id_4.fits \
     --stats-file combined_stats.dat \
     --injection-number 4 \
@@ -24,7 +24,7 @@ python ../plot_timing_circles.py \
     --outdir . \
     --no-show
 
-python ../plot_timing_circles.py \
+gw-skychron \
     --skymap-file sim_id_4.fits \
     --stats-file combined_stats.dat \
     --injection-number 4 \
@@ -37,7 +37,7 @@ python ../plot_timing_circles.py \
     --outdir . \
     --no-show
 
-python ../plot_timing_circles.py \
+gw-skychron \
     --skymap-file sim_id_4.fits \
     --stats-file combined_stats.dat \
     --injection-number 4 \
@@ -51,7 +51,7 @@ python ../plot_timing_circles.py \
     --outdir . \
     --no-show
 
-python ../plot_timing_circles.py \
+gw-skychron \
     --skymap-file sim_id_25.fits \
     --stats-file combined_stats.dat \
     --injection-number 25 \
@@ -65,7 +65,7 @@ python ../plot_timing_circles.py \
     --outdir . \
     --no-show
 
-python ../plot_timing_circles.py \
+gw-skychron \
     --skymap-file sim_id_25.fits \
     --stats-file combined_stats.dat \
     --injection-number 25 \
@@ -83,16 +83,16 @@ python ../plot_timing_circles.py \
 # -- 25 might have mainly been a two-detector event, hence the long circle
 
 
-python ../plot_timing_circles.py \
+gw-skychron \
     --bilby-json hv_true_snr_fixed_spins_nohom_zero_noise_result.json \
-    --ring-pairs L1-H1 L1-V1 H1-V1 \
+    --ring-pairs H1-V1 \
     --contour-levels 50 90 \
     --timing-uncertainty --n-annulus 96 \
     --outdir . \
     --no-show
 
 
-python ../plot_timing_circles.py \
+gw-skychron \
     --sky-pos 97.2 -35.7 1187008882 \
     --ring-pairs L1-H1 L1-V1 H1-V1 \
     --label-frac 0.42 0.8 0.8 \
@@ -101,7 +101,7 @@ python ../plot_timing_circles.py \
     --no-show
 
 
-python ../plot_timing_circles.py \
+gw-skychron \
     `# --skymap-file sim_id_4.fits` \
     --stats-file combined_stats.dat \
     --injection-number 4 \
