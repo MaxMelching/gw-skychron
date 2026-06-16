@@ -58,6 +58,7 @@ gw-skychron \
     --plot-freq 56 \
     --ring-pairs L1-H1 L1-V1 H1-V1 \
     --timing-uncertainty --timing-sigma-ms 0.25 \
+    --resp-func \
     --globe
 ```
 

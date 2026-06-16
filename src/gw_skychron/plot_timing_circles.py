@@ -88,6 +88,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib import rc_context
+from matplotlib.collections import LineCollection
 from matplotlib.path import Path
 from matplotlib.transforms import Affine2D
 from astropy.table import Table
@@ -204,6 +205,14 @@ def build_parser():
         "One value applies to all pairs; one value per pair is also accepted "
         "(requires --ring-pairs so the per-pair mapping is unambiguous). "
         "Default: label placed at the highest visible point on the ring.",
+    )
+    p.add_argument(
+        "--resp-func",
+        action="store_true",
+        help="Color each timing circle by the combined antenna response "
+        "sqrt(F1² + F2²) at each point along the ring, using a single "
+        "normalized color scale across all pairs. Annulus rings (if any) "
+        "keep their per-pair color.",
     )
     p.add_argument(
         "--timing-uncertainty",
@@ -391,7 +400,7 @@ def _plot_skymap(ax, sm, contour_levels, plot_freq, show_annotation):
             for p, a in zip(contour_levels, _areas)
         ]
         ax.text(
-            0.88,
+            0.89,
             1.0,
             "\n".join(_ann_lines),
             transform=ax.transAxes,
@@ -649,8 +658,8 @@ def main(argv=None):
 
     with rc_context(
         {
-            "xtick.labelsize": 24,
-            "ytick.labelsize": 24,
+            "xtick.labelsize": 20,
+            "ytick.labelsize": 20,
             "lines.linewidth": 3,
             "font.family": "sans-serif",
             "font.sans-serif": ["Georgia", "DejaVu Sans"],  # With fallback
@@ -687,7 +696,11 @@ def main(argv=None):
                 # at the limb (as they would on a real transparent sphere).
                 back_center = f"{(_lon_c + 180.0) % 360.0:.2f}d {-_lat_c:+.2f}d"
 
-                _rect = [0.05, 0.02, 0.90, 0.90]
+                # 10 % left/right margins so WCSAxes latitude labels (which
+                # render outside the axes rectangle on the left) are not
+                # clipped at the figure edge.  --geo uses add_subplot() which
+                # provides ~12.5 % automatically; we need to replicate that.
+                _rect = [0.10, 0.02, 0.80, 0.90]
                 back_ax = fig.add_axes(
                     _rect,
                     projection="geo globe",
@@ -762,8 +775,19 @@ def main(argv=None):
         _ring_colors = plt.get_cmap("viridis")(np.linspace(0, 1, len(ring_pairs)))
         np.random.seed(args.seed)
 
+        if args.resp_func:
+            _resp_vals_all = [
+                np.sqrt(rings[(d1, d2)][2] ** 2 + rings[(d1, d2)][3] ** 2)
+                for d1, d2 in ring_pairs
+            ]
+            _resp_norm = plt.Normalize(
+                min(v.min() for v in _resp_vals_all),
+                max(v.max() for v in _resp_vals_all),
+            )
+            _resp_cmap = plt.get_cmap("viridis")
+
         for (d1, d2), color, _lf in zip(ring_pairs, _ring_colors, label_fracs):
-            ras, decs, _, _ = rings[(d1, d2)]
+            ras, decs, F1, F2 = rings[(d1, d2)]
             label = f"{d1}-{d2}"
 
             if args.timing_uncertainty:
@@ -835,12 +859,37 @@ def main(argv=None):
             jumps = np.where(np.abs(np.diff(lons)) > 180)[0] + 1
             lons_p = np.insert(lons.astype(float), jumps, np.nan)
             lats_p = np.insert(lats.astype(float), jumps, np.nan)
-            ax.plot(lons_p, lats_p, linewidth=2, color=color, zorder=10, **PLT_ARGS)
-            if back_ax is not None:
-                back_ax.plot(
-                    lons_p, lats_p, linewidth=2, color=color, alpha=0.4, zorder=10,
-                    **BACK_PLT_ARGS,
-                )
+
+            if args.resp_func:
+                resp_vals = np.sqrt(F1 ** 2 + F2 ** 2)
+                _jump_set = set(jumps.tolist())
+                _segs, _svals = [], []
+                for _i in range(len(lons) - 1):
+                    if (_i + 1) in _jump_set:
+                        continue
+                    _segs.append([(lons[_i], lats[_i]), (lons[_i + 1], lats[_i + 1])])
+                    _svals.append((resp_vals[_i] + resp_vals[_i + 1]) / 2)
+                _svals = np.asarray(_svals)
+                _lc = LineCollection(_segs, linewidth=2, zorder=10,
+                                     transform=ax.get_transform("world"))
+                _lc.set_array(_svals)
+                _lc.set_cmap(_resp_cmap)
+                _lc.set_norm(_resp_norm)
+                ax.add_collection(_lc)
+                if back_ax is not None:
+                    _lc_back = LineCollection(_segs, linewidth=2, alpha=0.4, zorder=10,
+                                             transform=back_ax.get_transform("world"))
+                    _lc_back.set_array(_svals)
+                    _lc_back.set_cmap(_resp_cmap)
+                    _lc_back.set_norm(_resp_norm)
+                    back_ax.add_collection(_lc_back)
+            else:
+                ax.plot(lons_p, lats_p, linewidth=2, color=color, zorder=10, **PLT_ARGS)
+                if back_ax is not None:
+                    back_ax.plot(
+                        lons_p, lats_p, linewidth=2, color=color, alpha=0.4, zorder=10,
+                        **BACK_PLT_ARGS,
+                    )
 
             # inline label
             step = max(3, len(ras) // 60)
@@ -934,7 +983,11 @@ def main(argv=None):
 
             import matplotlib.colors as mcolors
 
-            darker = tuple(c * 0.5 for c in mcolors.to_rgba(color)[:3]) + (1.0,)
+            darker = (
+                tuple(c * 0.5 for c in mcolors.to_rgba(color)[:3]) + (1.0,)
+                if not args.resp_func
+                else _resp_cmap(0.0)
+            )
 
             ax.text(
                 lons[idx],
@@ -952,6 +1005,22 @@ def main(argv=None):
                 fontweight="bold",
                 zorder=20,
             )
+
+        if args.resp_func:
+            _sm = plt.cm.ScalarMappable(cmap=_resp_cmap, norm=_resp_norm)
+            _sm.set_array([])
+            _cb = plt.colorbar(
+                _sm, ax=ax,
+                location="bottom",
+                fraction=0.046,
+                pad=0.04,
+            )
+            # _cb.ax.tick_params(labelsize=18)
+            _cb.set_label(r"$\sqrt{F_1^2 + F_2^2}$", fontsize=22)
+            # In globe mode ax and back_ax share the same explicit rect; after
+            # the colorbar steals space from ax, keep back_ax in sync.
+            if back_ax is not None:
+                back_ax.set_position(ax.get_position())
 
         # true source
         src_lon = (
